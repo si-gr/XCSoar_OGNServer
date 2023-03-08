@@ -1,0 +1,9 @@
+.venv*
+.vscode*
+plots*
+*.xlsx
+__pycache__*
+private.key
+names.csv
+adminChat.id
+serverdata.txt
