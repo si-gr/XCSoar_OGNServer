@@ -15,7 +15,7 @@ class TelegramBot:
                 out = open(self.__filename, "a")
                 out.write(context.args[0] + "\n")
                 out.close()
-                await update.message.reply_markdown_v2("added " + context.args[0])
+                await update.message.reply_markdown_v2("added " + context.args[0].replace(".","\\."))
     
     async def delete(self, update: Update, context: CallbackContext):
         if(update.effective_user.id == int(self.__adminId) and context.args is not None and len(context.args) == 1 and update.message is not None):
@@ -32,9 +32,9 @@ class TelegramBot:
                         deleted = True
                 names_file.close()
                 if deleted:
-                    await update.message.reply_markdown_v2("deleted " + context.args[0])
+                    await update.message.reply_markdown_v2("deleted " + context.args[0].replace(".","\\."))
                 else:
-                    await update.message.reply_markdown_v2("not found " + context.args[0])
+                    await update.message.reply_markdown_v2("not found " + context.args[0].replace(".","\\."))
 
     def create_telegram_bot(self):
         priv_key_file = open("private.key", "r")

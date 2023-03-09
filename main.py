@@ -46,17 +46,21 @@ def filter_messages(bounds):
         average.append((float(bounds[2]) + float(bounds[3])) / 2)
     except ValueError as err:
         return "invalid bound values"
-    names_df = pd.read_csv("names.csv", names=["id","name"], header=0)
+    names_df = pd.read_csv("names.csv", names=["fid","name"], header=0)
     #print(names_df)
     for msg in current_messages:
         if abs(float(msg.latitude) - average[0]) < 1:
             #print("in lat")
             if abs(float(msg.longitude) - average[1]) < 1:
-                #print("in lon")
-                all_nicknames = names_df[names_df["id"] == msg.name]
+                #print(msg.name + " short " + msg.name[-4:])
+                all_nicknames = names_df[names_df["fid"] == msg.name]
+                #print("ndf" + names_df["fid"].iloc[1] + "msg" + msg.name)
+                #print(names_df["fid"].isin([msg.name]))
                 nickname = msg.name
                 if (len(all_nicknames) > 0):
                     nickname = all_nicknames["name"].iloc[0]
+                    if (nickname == '....'):
+                        continue
                 
                 #print(msg.beacon_type)
 
@@ -88,7 +92,8 @@ def process_beacon(raw_message):
         #print('Received {aprs_type}: {raw_message}'.format(**beacon))
         #print(current_messages)
         #print(beacon)
-        if("address" in beacon and "ground_speed" in beacon and "climb_rate" in beacon and "symbolcode" in beacon and beacon["symbolcode"] is not 'n'):
+        if("address" in beacon and "ground_speed" in beacon and "climb_rate" in beacon and "symbolcode" in beacon and beacon["symbolcode"] is not 'n' and beacon["symbolcode"] is not 'X' and beacon["symbolcode"] is not '^' and beacon["symbolcode"] is not 'g'):
+            #print(beacon["symbolcode"])
             current_beacon = beacon_class(beacon["address"], beacon["name"], beacon["latitude"], beacon["longitude"], beacon["track"], beacon["altitude"], beacon["ground_speed"], beacon["climb_rate"], beacon["reference_timestamp"], beacon["symbolcode"])
             try:
                 ind = current_messages.index(current_beacon)
