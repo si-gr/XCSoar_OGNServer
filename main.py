@@ -49,9 +49,9 @@ def filter_messages(bounds):
     names_df = pd.read_csv("names.csv", names=["fid","name"], header=0)
     #print(names_df)
     for msg in current_messages:
-        if abs(float(msg.latitude) - average[0]) < 1:
+        if abs(float(msg.latitude) - average[0]) < 0.5:
             #print("in lat")
-            if abs(float(msg.longitude) - average[1]) < 1:
+            if abs(float(msg.longitude) - average[1]) < 0.5:
                 #print(msg.name + " short " + msg.name[-4:])
                 all_nicknames = names_df[names_df["fid"] == msg.name]
                 #print("ndf" + names_df["fid"].iloc[1] + "msg" + msg.name)
