@@ -92,8 +92,28 @@ def process_beacon(raw_message):
         #print('Received {aprs_type}: {raw_message}'.format(**beacon))
         #print(current_messages)
         #print(beacon)
+        if "address" in beacon:
+            names_df = pd.read_csv("names.csv", names=["fid","name"], header=0)
+            dt = datetime.datetime.now()
+            if beacon["address"] in names_df["fid"].values:
+                nickname = names_df[names_df["fid"].str.contains(beacon["address"][2:])].iloc[0]["name"]
+                igcFile = open(str(dt.year) + str(dt.month) + str(dt.day) + nickname + ".igc", "a")
+                lat_d = beacon["latitude"]
+                lat_m = (lat_d - int(lat_d))*60
+                lat_s = (lat_m - int(lat_m))*60
+                long_d = beacon["longitude"]
+                long_m = (long_d - int(long_d))*60
+                long_s = (long_m - int(long_m))*60
+                igcFile.write(f'B{beacon["reference_timestamp"].hour}{beacon["reference_timestamp"].minute}{beacon["reference_timestamp"].second}{int(lat_d)}{int(lat_m)}{int(lat_s*10)}N{int(long_d)}{int(long_m)}{int(long_s*10)}EA000000{int(beacon["altitude"]*10)}\n')
+                igcFile.close()
         if("address" in beacon and "ground_speed" in beacon and "climb_rate" in beacon and "symbolcode" in beacon and beacon["symbolcode"] is not 'n' and beacon["symbolcode"] is not 'X' and beacon["symbolcode"] is not '^' and beacon["symbolcode"] is not 'g'):
             #print(beacon["symbolcode"])
+            target_lat = float(serverdata[2].strip())
+            target_lon = float(serverdata[3].strip())
+            if beacon["latitude"] < target_lat + 0.01 and beacon["latitude"] > target_lat - 0.01 and beacon["longitude"] < target_lon + 0.01 and beacon["longitude"] > target_lon - 0.01:
+                loc_file = open("location.txt", "a")
+                loc_file.write(f'{beacon["address"]},{beacon["latitude"]},{beacon["longitude"]},{beacon["track"]},{beacon["altitude"]},{beacon["ground_speed"]},{beacon["climb_rate"]},{beacon["reference_timestamp"]},{beacon["symbolcode"]}')
+                loc_file.close()
             current_beacon = beacon_class(beacon["address"], beacon["name"], beacon["latitude"], beacon["longitude"], beacon["track"], beacon["altitude"], beacon["ground_speed"], beacon["climb_rate"], beacon["reference_timestamp"], beacon["symbolcode"])
             try:
                 ind = current_messages.index(current_beacon)
