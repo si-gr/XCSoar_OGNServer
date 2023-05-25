@@ -1,5 +1,5 @@
 from multiprocessing.sharedctypes import Value
-from ogn.client import AprsClient
+from ogn.client import AprsClient, settings
 from ogn.parser import parse, ParseError
 from flask import Flask
 import time
@@ -129,7 +129,8 @@ def process_beacon(raw_message):
         print('{}: {}'.format(e, raw_message))
 
 def create_ogn_client():
-    client = AprsClient(aprs_user='N0CALL', aprs_filter="")
+    settings.APRS_SERVER_HOST = "glidern3.glidernet.org"
+    client = AprsClient(aprs_user='N0CALL', aprs_filter="", settings=settings)
     client.connect()
     client.run(callback=process_beacon, autoreconnect=True)
 
