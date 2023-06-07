@@ -9,6 +9,11 @@ from waitress import serve
 import threading
 from telegrambot import TelegramBot
 import pandas as pd
+import tracemalloc
+import os
+
+tracemalloc.start(10)
+
 
 
 class beacon_class:
@@ -30,12 +35,15 @@ class beacon_class:
 
 
 current_messages = []
+names_df = pd.DataFrame()
+names_df_time = 0
 timestamp = time.time()
 
 
 # bounds: array of strings lat, long
 def filter_messages(bounds):
     global current_messages
+    global names_df
     
     filtered_message_str = ""
     counter = 0
@@ -46,7 +54,6 @@ def filter_messages(bounds):
         average.append((float(bounds[2]) + float(bounds[3])) / 2)
     except ValueError as err:
         return "invalid bound values"
-    names_df = pd.read_csv("names.csv", names=["fid","name"], header=0)
     #print(names_df)
     for msg in current_messages:
         if abs(float(msg.latitude) - average[0]) < 0.5:
@@ -72,6 +79,8 @@ def filter_messages(bounds):
 def process_beacon(raw_message):
     global current_messages
     global timestamp
+    global names_df
+    global names_df_time
     #print(time.time())
     #print(time.time() + 30)
     if time.time() > timestamp + 30:
@@ -85,15 +94,25 @@ def process_beacon(raw_message):
                 current_messages.pop(i)
                 i -= 1
             i += 1
-        print(len(current_messages))
+        print(f"len {len(current_messages)}")
+        #snapshot = tracemalloc.take_snapshot()
+        
+        #memfile = open("mem.log", "a")
+        #memfile.write(f"{snapshot.statistics('filename')}\n")
+        #memfile.close()
+        
     try:
         
         beacon = parse(raw_message)
+        current_file_time = os.stat("names.csv").st_mtime
+        if current_file_time > names_df_time:
+            names_df = pd.read_csv("names.csv", names=["fid","name"], header=0)
+            names_df_time = current_file_time
+            print(f"reading names csv ftime {str(current_file_time)}")
         #print('Received {aprs_type}: {raw_message}'.format(**beacon))
         #print(current_messages)
         #print(beacon)
         if "address" in beacon:
-            names_df = pd.read_csv("names.csv", names=["fid","name"], header=0)
             dt = datetime.datetime.now()
             if beacon["address"][2:] in names_df["fid"].values:
                 #print(f"found addr {beacon['address']}")
