@@ -66,6 +66,7 @@ def filter_messages(bounds):
                 nickname = msg.name
                 if (len(all_nicknames) > 0):
                     nickname = all_nicknames["name"].iloc[0]
+                    #print(nickname)
                     if (nickname == '....'):
                         continue
                 
@@ -130,7 +131,7 @@ def process_beacon(raw_message):
             #print(beacon["symbolcode"])
             target_lat = float(serverdata[2].strip())
             target_lon = float(serverdata[3].strip())
-            if beacon["latitude"] < target_lat + 0.01 and beacon["latitude"] > target_lat - 0.01 and beacon["longitude"] < target_lon + 0.01 and beacon["longitude"] > target_lon - 0.01:
+            if beacon["latitude"] < target_lat + 0.01 and beacon["latitude"] > target_lat - 0.03 and beacon["longitude"] < target_lon + 0.01 and beacon["longitude"] > target_lon - 0.03:
                 loc_file = open("location.txt", "a")
                 loc_file.write(f'{beacon["address"]},{beacon["latitude"]},{beacon["longitude"]},{beacon["track"]},{beacon["altitude"]},{beacon["ground_speed"]},{beacon["climb_rate"]},{beacon["reference_timestamp"]},{beacon["symbolcode"]}\n')
                 loc_file.close()
