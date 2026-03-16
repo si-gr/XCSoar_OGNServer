@@ -1,0 +1,5 @@
+# Location Log File (auto-generated)
+# Format: address,latitude,longitude,track,altitude,ground_speed,climb_rate,timestamp,symbolcode
+
+# Example entry:
+# FLR123456,47.51234,13.01234,180,1500,100,2.5,1705312245,^

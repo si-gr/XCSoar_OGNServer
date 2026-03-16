@@ -1,0 +1,17 @@
+version: "3.8"
+
+services:
+  ogn-server:
+    build: .
+    container_name: xcsoar-ogn-server
+    volumes:
+      - ./names.csv:/app/names.csv
+      - ./serverdata.txt:/app/serverdata.txt
+      - ./private.key:/app/private.key
+      - ./adminChat.id:/app/adminChat.id
+      - ./location.txt:/app/location.txt
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1

@@ -1,0 +1,10 @@
+# Flarm ID to Pilot Name Mappings
+# Format: fid,name
+# FLARM ID format: FLR + 6 hex characters (e.g., FLR3ECA1B)
+
+# Example entries:
+fid,name
+FLR123456,John Doe
+FLR789012,Jane Smith
+FLRABCDEF,Pilot One
+FLR999999,Test Glider

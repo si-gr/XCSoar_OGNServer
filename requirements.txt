@@ -1,0 +1,5 @@
+Flask
+ogn-client
+waitress
+python-telegram-bot
+pandas

@@ -1,0 +1,14 @@
+# OGN Server Configuration
+# Replace these values with your actual configuration
+
+# Line 1: Access token for API authentication
+mysecrettoken
+
+# Line 2: Host to bind to (0.0.0.0 for all interfaces)
+0.0.0.0
+
+# Line 3: Target latitude for filtering beacons
+47.5
+
+# Line 4: Target longitude for filtering beacons
+13.0

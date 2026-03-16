@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xcsoar-ogn-server"
+version = "1.0.0"
+description = "OGN (Open Glider Network) server for XCSoar"
+requires-python = ">=3.10"
+dependencies = [
+    "Flask",
+    "ogn-client",
+    "waitress",
+    "python-telegram-bot",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+]
