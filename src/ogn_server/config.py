@@ -27,20 +27,26 @@ class Config:
         serverdata_path = Path(cls.SERVERDATA_FILE)
         if serverdata_path.exists():
             with open(cls.SERVERDATA_FILE, "r") as f:
-                return [line.strip() for line in f.readlines()]
+                lines = [line.strip() for line in f.readlines() if line.strip() and not line.startswith("#")]
+                return lines if len(lines) >= 4 else None
         return None
     
     @classmethod
     def load_admin_chat_id(cls):
         admin_chat_id_path = Path(cls.ADMIN_CHAT_ID_FILE)
         if admin_chat_id_path.exists():
-            return admin_chat_id_path.read_bytes()
-        return b"0"
+            content = admin_chat_id_path.read_text().strip()
+            if content:
+                return content
+        return "0"
     
     @classmethod
     def load_private_key(cls):
         priv_key_path = Path(cls.PRIVATE_KEY_FILE)
         if priv_key_path.exists():
             with open(cls.PRIVATE_KEY_FILE, "r") as f:
-                return f.readlines()[0].strip()
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        return line
         return None
