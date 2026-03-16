@@ -55,7 +55,7 @@ class TestConfig:
         try:
             os.chdir(tmp_path)
             result = Config.load_admin_chat_id()
-            assert result == b"0"
+            assert result == "0"
         finally:
             os.chdir(original_cwd)
     
@@ -67,7 +67,7 @@ class TestConfig:
             
             result = Config.load_admin_chat_id()
             
-            assert result == b"123456"
+            assert result == "123456"
         finally:
             os.chdir(original_cwd)
     

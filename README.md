@@ -181,3 +181,34 @@ If you want to run without Docker:
 ## License
 
 MIT
+
+## TODO
+
+- [x] Add health check endpoint (`/health`) for monitoring and container orchestration
+- [x] Implement API rate limiting to prevent abuse
+- [x] Add Prometheus metrics endpoint for observability
+- [x] Add unit tests for telegram_bot module
+- [x] Add integration tests for the full system
+- [x] Improve IGC file handling with automatic file rotation and cleanup
+- [x] Add structured logging (JSON format) for better log analysis
+- [x] Implement input validation for configuration files on startup
+- [x] Add caching layer for frequently requested beacon data
+- [x] Improve error handling and recovery in OGN client with retry logic
+
+## Changelog
+
+### v1.1.0 (2025-03-16)
+- **Features**
+  - Added `/health` endpoint for container orchestration monitoring
+  - Added `/metrics` endpoint for Prometheus observability
+  - Added API rate limiting (60 requests/minute per client)
+  - Added caching layer for beacon data (5 second TTL)
+  - Added IGC file retention (30 days) with automatic cleanup
+  - Added configuration validation on startup
+
+- **Testing**
+  - Added unit tests for telegram_bot module
+  - Added integration tests for full system
+
+- **Logging**
+  - Added structured JSON logging for better log analysis

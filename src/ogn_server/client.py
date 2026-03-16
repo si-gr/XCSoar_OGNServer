@@ -15,9 +15,14 @@ class OGNClient:
         self.serverdata = serverdata
         self.current_messages: list[Beacon] = []
         self.timestamp = 0
+        self.igc_cleanup_timestamp = 0
         self.names_df = pd.DataFrame()
         self.names_df_time = 0
         self._load_names_df()
+        self._cache: dict = {}
+        self._cache_ttl_seconds = 5
+        self._error_count = 0
+        self._last_error_time = 0
     
     def _load_names_df(self):
         names_path = Path(Config.NAMES_FILE)
@@ -30,6 +35,19 @@ class OGNClient:
                     header=0
                 )
                 self.names_df_time = current_file_time
+    
+    def _cleanup_old_igc_files(self):
+        import time
+        igc_dir = Path(Config.IGC_FOLDER)
+        if not igc_dir.exists():
+            return
+        cutoff_time = time.time() - (Config.IGC_RETENTION_DAYS * 86400)
+        for igc_file in igc_dir.glob("*.igc"):
+            try:
+                if os.stat(igc_file).st_mtime < cutoff_time:
+                    igc_file.unlink()
+            except OSError:
+                pass
     
     def _get_nickname(self, beacon_name: str) -> Optional[str]:
         all_nicknames = self.names_df[self.names_df["fid"] == beacon_name]
@@ -114,6 +132,9 @@ class OGNClient:
                     self.current_messages.pop(i)
                     i -= 1
                 i += 1
+            if time.time() > self.igc_cleanup_timestamp + 3600:
+                self.igc_cleanup_timestamp = time.time()
+                self._cleanup_old_igc_files()
     
     def process_beacon(self, raw_message: str):
         self._cleanup_old_beacons()
@@ -122,15 +143,27 @@ class OGNClient:
         try:
             beacon = parse(raw_message)
         except AprsParseError as e:
+            import time
+            self._error_count += 1
+            self._last_error_time = time.time()
             print(f'Error, {e.message}')
             return
         except NotImplementedError as e:
+            import time
+            self._error_count += 1
+            self._last_error_time = time.time()
             print(f'{e}: {raw_message}')
             return
         except AttributeError as e:
+            import time
+            self._error_count += 1
+            self._last_error_time = time.time()
             print(f'{e}: {raw_message}')
             return
         except ValueError as e:
+            import time
+            self._error_count += 1
+            self._last_error_time = time.time()
             print(f'ValueError: {e}')
             return
         
@@ -165,6 +198,14 @@ class OGNClient:
             self._write_igc_file(beacon)
     
     def get_messages_in_bounds(self, bounds: list[str]) -> str:
+        import time
+        cache_key = ",".join(bounds)
+        
+        if cache_key in self._cache:
+            cached_time, cached_result = self._cache[cache_key]
+            if time.time() - cached_time < self._cache_ttl_seconds:
+                return cached_result
+        
         try:
             center_lat = (float(bounds[0]) + float(bounds[1])) / 2
             center_lon = (float(bounds[2]) + float(bounds[3])) / 2
@@ -181,18 +222,35 @@ class OGNClient:
         
         count = len(filtered_messages)
         header = f"{count},{count}\n"
-        return header + "".join(filtered_messages)
+        result = header + "".join(filtered_messages)
+        
+        self._cache[cache_key] = (time.time(), result)
+        return result
     
     def run(self, callback: Optional[Callable] = None, autoreconnect: bool = True):
-        ogn_settings.APRS_SERVER_HOST = Config.OGN_SERVER_HOST
-        client = AprsClient(
-            aprs_user=Config.OGN_APRS_USER,
-            aprs_filter=Config.OGN_APRS_FILTER,
-            settings=ogn_settings
-        )
-        client.connect()
+        import time
+        max_retries = 5
+        retry_delay = 10
         
-        if callback is None:
-            callback = self.process_beacon
-        
-        client.run(callback=callback, autoreconnect=autoreconnect)
+        for attempt in range(max_retries):
+            try:
+                ogn_settings.APRS_SERVER_HOST = Config.OGN_SERVER_HOST
+                client = AprsClient(
+                    aprs_user=Config.OGN_APRS_USER,
+                    aprs_filter=Config.OGN_APRS_FILTER,
+                    settings=ogn_settings
+                )
+                client.connect()
+                
+                if callback is None:
+                    callback = self.process_beacon
+                
+                client.run(callback=callback, autoreconnect=autoreconnect)
+            except Exception as e:
+                print(f"OGN client error: {e}. Reconnecting...")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                else:
+                    print(f"Max retries reached. Last error: {e}")
+                    raise

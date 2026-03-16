@@ -3,3 +3,5 @@ ogn-client
 waitress
 python-telegram-bot
 pandas
+Flask-Limiter
+prometheus-client
