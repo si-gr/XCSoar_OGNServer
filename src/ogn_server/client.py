@@ -125,6 +125,9 @@ class OGNClient:
         except AttributeError as e:
             print(f'{e}: {raw_message}')
             return
+        except ValueError as e:
+            print(f'ValueError: {e}')
+            return
         
         if "address" not in beacon:
             return
