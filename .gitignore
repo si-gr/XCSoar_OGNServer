@@ -1,9 +1,31 @@
-.venv*
-.vscode*
-plots*
-*.xlsx
-__pycache__*
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Generated/Log files
+*.log
+plots/
+
+# Data files (persistent, should not be in repo)
+igc_files/
+
+# Config files with secrets (uncomment if you want to ignore)
 private.key
-names.csv
 adminChat.id
 serverdata.txt
+location.txt
+names.csv

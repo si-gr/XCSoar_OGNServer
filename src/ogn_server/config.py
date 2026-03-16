@@ -12,6 +12,7 @@ class Config:
     PRIVATE_KEY_FILE = "private.key"
     ADMIN_CHAT_ID_FILE = "adminChat.id"
     LOCATION_FILE = "location.txt"
+    IGC_FOLDER = "igc_files"
     
     BEACON_TIMEOUT_SECONDS = 30
     CLEANUP_INTERVAL_SECONDS = 30

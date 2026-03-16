@@ -38,7 +38,7 @@ class OGNClient:
             if nickname == '....':
                 return None
             return nickname
-        return None
+        return beacon_name
     
     def _is_valid_symbol(self, symbolcode: str) -> bool:
         invalid_symbols = ['n', 'X', '^', 'g']
@@ -65,7 +65,9 @@ class OGNClient:
                 f'A00000{int(beacon["altitude"]):05d}\n'
             )
             
-            igc_filename = f"{dt.year}{dt.month}{dt.day}{nickname}.igc"
+            igc_dir = Path(Config.IGC_FOLDER)
+            igc_dir.mkdir(exist_ok=True)
+            igc_filename = igc_dir / f"{dt.year}{dt.month:02d}{dt.day:02d}{nickname}.igc"
             with open(igc_filename, "a") as igc_file:
                 igc_file.write(igc_line)
     

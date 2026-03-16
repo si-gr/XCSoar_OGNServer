@@ -8,6 +8,7 @@ services:
       - ./private.key:/app/private.key
       - ./adminChat.id:/app/adminChat.id
       - ./location.txt:/app/location.txt
+      - ./igc_files:/app/igc_files
     ports:
       - "8000:8000"
     restart: unless-stopped
