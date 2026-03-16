@@ -104,7 +104,10 @@ class OGNClient:
             self.timestamp = time.time()
             i = 0
             while i < len(self.current_messages):
-                age = (datetime.datetime.utcnow() - self.current_messages[i].reference_timestamp).total_seconds()
+                ref_ts = self.current_messages[i].reference_timestamp
+                if ref_ts.tzinfo is not None:
+                    ref_ts = ref_ts.replace(tzinfo=None)
+                age = (datetime.datetime.utcnow() - ref_ts).total_seconds()
                 if age > Config.BEACON_TIMEOUT_SECONDS:
                     self.current_messages.pop(i)
                     i -= 1
