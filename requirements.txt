@@ -5,3 +5,5 @@ python-telegram-bot
 pandas
 Flask-Limiter
 prometheus-client
+APScheduler==3.10.4
+pytz

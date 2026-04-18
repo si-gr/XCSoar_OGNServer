@@ -24,6 +24,8 @@ class Config:
     
     IGC_RETENTION_DAYS = 30
     
+    DAILY_RESTART_HOUR = int(os.environ.get("DAILY_RESTART_HOUR", 3))
+    
     API_ACCESS_TOKEN_INDEX = 0
     API_HOST_INDEX = 1
     API_TARGET_LAT_INDEX = 2
