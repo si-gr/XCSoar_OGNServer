@@ -19,3 +19,12 @@ class JSONFormatter(logging.Formatter):
         if hasattr(record, 'bounds'):
             log_data['bounds'] = record.bounds
         return json.dumps(log_data)
+
+
+# Module-level logger configured with JSONFormatter
+logger = logging.getLogger("ogn_server")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
