@@ -160,7 +160,6 @@ class OGNClient:
             import time
             self._error_count += 1
             self._last_error_time = time.time()
-            logger.error(f"APRS parsing error: {e.message}")
             return
         except NotImplementedError as e:
             import time
