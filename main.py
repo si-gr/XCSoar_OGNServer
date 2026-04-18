@@ -43,25 +43,18 @@ def setup_signal_handlers(ogn_client=None):
             except Exception:
                 logger.exception("OGN client shutdown raised an exception")
             logger.info("OGN client shutdown completed")
-        elif ogn_client_ref is not None and hasattr(ogn_client_ref, "close"):
-            logger.info("Shutting down OGN client before restart...")
-            try:
-                ogn_client.shutdown()
-            except Exception:
-                logger.exception("OGN client shutdown raised an exception")
-            logger.info("OGN client shutdown completed")
+
+            # If a run thread reference was attached to the client, wait for it to terminate
+            th = getattr(ogn_client_ref, "restart_thread", None)
+            if isinstance(th, threading.Thread) and th.is_alive():
+                logger.info("Waiting for OGN run thread to terminate before restart...")
+                th.join(timeout=5)
+                logger.info("OGN run thread termination status: alive=%s", th.is_alive())
         
-        # Reap any zombie child processes
-        try:
-            while True:
-                pid, _ = os.waitpid(-1, os.WNOHANG)
-                if pid == 0:
-                    break
-        except OSError:
-            pass
-        
+        # Note: Zombie reaping is skipped here to avoid potential deadlocks during restart.
         # Restart the application using execv (replaces current process)
-        logger.info("Restarting application...")
+        logger.info("Restarting application... (execv will replace current process)")
+        logger.info("os.execv arguments: %s", [sys.executable] + sys.argv)
         os.execv(sys.executable, [sys.executable] + sys.argv)
     
     signal.signal(signal.SIGTERM, graceful_shutdown)
@@ -84,6 +77,12 @@ def main():
     thread = threading.Thread(target=ogn_client.run, kwargs={"autoreconnect": True})
     thread.daemon = True
     thread.start()
+    # Expose the run thread on the OGN client for graceful shutdown coordination
+    try:
+        setattr(ogn_client, "restart_thread", thread)
+    except Exception:
+        # If the client doesn't support arbitrary attributes, ignore gracefully
+        pass
     
     telegram_bot = TelegramBot()
     telegram_bot.run()
