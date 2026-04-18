@@ -1,5 +1,8 @@
 import os
 import datetime
+import logging
+import sys
+import json
 from pathlib import Path
 from typing import Callable, Optional
 import pandas as pd
@@ -8,6 +11,15 @@ from ogn.parser import parse, AprsParseError
 
 from .beacon import Beacon
 from .config import Config
+from .formatters import JSONFormatter, logger
+
+# Initialize module-level JSON-formatted logger
+logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(JSONFormatter())
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 
 class OGNClient:
@@ -23,6 +35,8 @@ class OGNClient:
         self._cache_ttl_seconds = 5
         self._error_count = 0
         self._last_error_time = 0
+        # Track the AprsClient instance to allow graceful shutdowns
+        self.client = None
     
     def _load_names_df(self):
         names_path = Path(Config.NAMES_FILE)
@@ -146,7 +160,7 @@ class OGNClient:
             import time
             self._error_count += 1
             self._last_error_time = time.time()
-            print(f'Error, {e.message}')
+            logger.error(f"APRS parsing error: {e.message}")
             return
         except NotImplementedError as e:
             import time
@@ -229,9 +243,11 @@ class OGNClient:
     
     def run(self, callback: Optional[Callable] = None, autoreconnect: bool = True):
         import time
+        logger.info("Starting OGN client...")
         max_retries = 5
         retry_delay = 10
-        
+        # Ensure there is a fresh client reference point for potential shutdowns
+
         for attempt in range(max_retries):
             try:
                 ogn_settings.APRS_SERVER_HOST = Config.OGN_SERVER_HOST
@@ -240,17 +256,40 @@ class OGNClient:
                     aprs_filter=Config.OGN_APRS_FILTER,
                     settings=ogn_settings
                 )
+                # Expose the client for external shutdown via self.shutdown()
+                self.client = client
                 client.connect()
+                logger.info("OGN client connected to OGN server")
                 
                 if callback is None:
                     callback = self.process_beacon
                 
                 client.run(callback=callback, autoreconnect=autoreconnect)
             except Exception as e:
-                print(f"OGN client error: {e}. Reconnecting...")
+                logger.warning(f"OGN client error: {e}. Reconnecting...")
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
-                    print(f"Max retries reached. Last error: {e}")
+                    logger.error(f"Max retries reached. Last error: {e}")
                     raise
+
+    def shutdown(self):
+        """Shutdown the OGN client by closing the underlying AprsClient if connected.
+
+        This method is idempotent and safe to call multiple times.
+        """
+        try:
+            logger.info("Shutting down OGN client...")
+            if getattr(self, 'client', None) is not None:
+                client = self.client
+                if hasattr(client, 'close'):
+                    try:
+                        client.close()
+                    except Exception as e:
+                        logger.exception("Error while closing OGN AprsClient: %s", e)
+            # Reset reference regardless of whether a client existed
+            self.client = None
+            logger.info("OGN client shutdown completed")
+        except Exception as e:
+            logger.exception("OGN client shutdown failed: %s", e)
