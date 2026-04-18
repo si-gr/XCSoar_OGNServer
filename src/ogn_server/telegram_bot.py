@@ -10,7 +10,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 
 from .config import Config
 
@@ -118,7 +118,7 @@ class TelegramBot:
     
     def setup_daily_restart(self):
         """Set up daily automatic restart at configured hour (default 3 AM UTC)."""
-        self.scheduler = AsyncIOScheduler()
+        self.scheduler = BackgroundScheduler()
         
         self.scheduler.add_job(
             self._trigger_daily_restart,
@@ -129,7 +129,7 @@ class TelegramBot:
         )
         self.scheduler.start()
     
-    async def _trigger_daily_restart(self):
+    def _trigger_daily_restart(self):
         print(f"Daily restart triggered at {datetime.now()} UTC")
         os.kill(os.getpid(), signal.SIGTERM)
     
