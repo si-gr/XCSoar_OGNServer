@@ -178,6 +178,103 @@ If you want to run without Docker:
    python main.py
    ```
 
+## External Restart Management
+
+The server supports graceful shutdown via SIGTERM. For automatic daily restarts, configure an external cronjob instead of using internal scheduling.
+
+### Option A: Docker Deployment (Recommended)
+
+**Host-level cronjob** (runs on your server):
+
+```bash
+# Edit system crontab: sudo crontab -e
+# Add this line to restart container daily at 3 AM UTC:
+0 3 * * * docker restart xcsoar-ogn-server >> /var/log/ogn-restart.log 2>&1
+```
+
+**Systemd timer** (modern alternative to cron):
+
+Create `/etc/systemd/system/ogn-server-restart.service`:
+```ini
+[Unit]
+Description=Daily restart of XCSoar OGN Server
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker restart xcsoar-ogn-server
+User=youruser
+```
+
+Create `/etc/systemd/system/ogn-server-restart.timer`:
+```ini
+[Unit]
+Description=Restart XCSoar OGN Server daily at 3 AM
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable with:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ogn-server-restart.timer
+```
+
+### Option B: Non-Docker Deployment
+
+**Systemd timer**:
+
+Create `/etc/systemd/system/ogn-server-restart.service`:
+```ini
+[Unit]
+Description=Daily restart of XCSoar OGN Server
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart ogn-server
+User=youruser
+```
+
+Create `/etc/systemd/system/ogn-server-restart.timer`:
+```ini
+[Unit]
+Description=Restart XCSoar OGN Server daily at 3 AM
+
+[Timer]
+OnCalendar=*-* escapes-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+**Cron equivalent**:
+```bash
+# Edit user crontab: crontab -e
+0 3 * * * /bin/systemctl restart ogn-server >> /var/log/ogn-restart.log 2>&1
+```
+
+### Logging
+
+- **Docker**: `docker logs xcsoar-ogn-server` or `journalctl -u xcsoar-ogn-server`
+- **Systemd**: `journalctl -u ogn-server` for server logs, `journalctl -u ogn-server-restart.service` for restart logs
+- **Cron**: Logs redirected to `/var/log/ogn-restart.log`
+
+### Graceful Shutdown
+
+The server handles SIGTERM gracefully:
+- OGN client disconnects cleanly
+- Telegram bot stops polling and closes connections
+- Flask API shuts down properly
+
+This ensures no data loss during restart.
+
 ## License
 
 MIT

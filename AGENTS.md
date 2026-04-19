@@ -117,8 +117,6 @@ Set these before running the application:
 export PYTHONPATH=/app  # Or adjust to your working directory
 export PYTHONUNBUFFERED=1  # Real-time log output
 
-# Optional: Configure daily restart time (default: 3 AM UTC)
-export DAILY_RESTART_HOUR=3
 ```
 
 ### Configuration Files Setup

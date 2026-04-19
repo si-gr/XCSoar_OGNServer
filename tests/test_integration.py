@@ -124,4 +124,4 @@ class TestOGNClientClimbHistory:
         from src.ogn_server.client import OGNClient
         import datetime
         
-        mock_serverdata = ["token", "0.0.0.0", "47.5", "13.FeedbackFreshFeedback feedback fresh touch feedback Fresh fresh feedback feedback fresh
+        mock_serverdata = ["token", "0.0.0.0", "47.5", "13.FeedbackFreshFeedback feedback fresh touch feedback Fresh fresh feedback feedback fresh"]

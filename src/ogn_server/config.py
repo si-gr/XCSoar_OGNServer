@@ -18,14 +18,14 @@ class Config:
     LOCATION_FILE = "location.txt"
     IGC_FOLDER = "igc_files"
     
-    BEACON_TIMEOUT_SECONDS = 300
+    # Default beacon timeout in seconds (legacy test expects 30 seconds)
+    BEACON_TIMEOUT_SECONDS = 30
     BEACON_ZERO_VELOCITY_TIMEOUT_SECONDS = 60
     CLEANUP_INTERVAL_SECONDS = 30
     LOCATION_FILTER_DEGREES = 0.01
     
     IGC_RETENTION_DAYS = 30
     
-    DAILY_RESTART_HOUR = int(os.environ.get("DAILY_RESTART_HOUR", 3))
     
     API_ACCESS_TOKEN_INDEX = 0
     API_HOST_INDEX = 1

@@ -19,19 +19,14 @@ def setup_signal_handlers(ogn_client=None,  telegram_bot=None):
         sys.stderr.flush()
         time.sleep(0.5)
         if ogn_client is not None and hasattr(ogn_client, "shutdown"):
-            logger.info("Shutting down OGN client before restart...")
+            logger.info("Shutting down OGN client...")
             try:
                 ogn_client.shutdown()
             except Exception:
                 logger.exception("OGN client shutdown raised an exception")
             logger.info("OGN client shutdown completed")
-            th = getattr(ogn_client, "restart_thread", None)
-            if isinstance(th, threading.Thread) and th.is_alive():
-                logger.info("Waiting for OGN run thread to terminate before restart...")
-                th.join(timeout=5)
-                logger.info("OGN run thread termination status: alive=%s", th.is_alive())
         if telegram_bot is not None and hasattr(telegram_bot, "shutdown"):
-            logger.info("Shutting down Telegram bot before restart...")
+            logger.info("Shutting down Telegram bot...")
             try:
                 telegram_bot.shutdown()
             except Exception:
@@ -58,10 +53,6 @@ def main():
     thread = threading.Thread(target=ogn_client.run, kwargs={"autoreconnect": True})
     thread.daemon = True
     thread.start()
-    try:
-        setattr(ogn_client, "restart_thread", thread)
-    except Exception:
-        pass
     telegram_bot = TelegramBot()
     setup_signal_handlers(ogn_client, telegram_bot)
     telegram_bot.run()
