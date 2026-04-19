@@ -4,6 +4,7 @@ import datetime
 import logging
 import sys
 import json
+import time
 from pathlib import Path
 from typing import Callable, Optional
 import pandas as pd
@@ -53,7 +54,6 @@ class OGNClient:
                 self.names_df_time = current_file_time
     
     def _cleanup_old_igc_files(self):
-        import time
         igc_dir = Path(Config.IGC_FOLDER)
         if not igc_dir.exists():
             return
@@ -194,7 +194,6 @@ class OGNClient:
         return True
     
     def _cleanup_old_beacons(self):
-        import time
         if time.time() > self.timestamp + Config.CLEANUP_INTERVAL_SECONDS:
             self.timestamp = time.time()
             i = 0
@@ -223,27 +222,36 @@ class OGNClient:
         try:
             beacon = parse(raw_message)
         except AprsParseError as e:
-            import time
+            if self._error_count > 10:
+                return
             self._error_count += 1
             self._last_error_time = time.time()
             return
         except NotImplementedError as e:
-            import time
+            if self._error_count > 10:
+                return
             self._error_count += 1
             self._last_error_time = time.time()
             print(f'{e}: {raw_message}')
             return
         except AttributeError as e:
-            import time
+            if self._error_count > 10:
+                return
             self._error_count += 1
             self._last_error_time = time.time()
             print(f'{e}: {raw_message}')
             return
         except ValueError as e:
-            import time
+            if self._error_count > 10:
+                return
             self._error_count += 1
             self._last_error_time = time.time()
-            print(f'ValueError: {e}')
+            # Log full context for debugging malformed APRS packets
+            # Truncate raw_message to avoid excessive log volume
+            raw_msg_preview = raw_message[:200] + "..." if len(raw_message) > 200 else raw_message
+            logger.warning(
+                f"ValueError parsing beacon: {e} | raw_message: {raw_msg_preview}"
+            )
             return
         
         if "address" not in beacon:
