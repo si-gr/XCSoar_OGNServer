@@ -1,3 +1,4 @@
+import logging
 import os
 import signal
 from datetime import datetime, timedelta
@@ -23,6 +24,7 @@ class TelegramBot:
         self.restart_pending = False
         self.confirmation_token = None
         self.scheduler = None
+        self.application = None
     
     async def add(self, update: Update, context: CallbackContext):
         if update.effective_user.id != int(self.admin_id):
@@ -141,7 +143,7 @@ class TelegramBot:
         # Set up daily automatic restart scheduler
         self.setup_daily_restart()
         
-        application = Application.builder().token(self.token).build()
+        self.application = Application.builder().token(self.token).build()
         
         add_handler = CommandHandler('a', self.add)
         del_handler = CommandHandler('d', self.delete)
@@ -149,13 +151,34 @@ class TelegramBot:
         restart_confirm_handler = CommandHandler('confirm_restart', self.restart_confirm)
         cancel_restart_handler = CommandHandler('cancel_restart', self.cancel_restart)
         
-        application.add_handler(add_handler)
-        application.add_handler(del_handler)
-        application.add_handler(restart_request_handler)
-        application.add_handler(restart_confirm_handler)
-        application.add_handler(cancel_restart_handler)
+        self.application.add_handler(add_handler)
+        self.application.add_handler(del_handler)
+        self.application.add_handler(restart_request_handler)
+        self.application.add_handler(restart_confirm_handler)
+        self.application.add_handler(cancel_restart_handler)
         
-        application.run_polling()
+        self.application.run_polling()
+    
+    def shutdown(self):
+        """Gracefully stop the Telegram bot and its scheduler."""
+        logger = logging.getLogger(__name__)
+        logger.info("Shutting down Telegram bot...")
+        
+        if self.scheduler:
+            try:
+                self.scheduler.shutdown()
+                logger.info("Telegram bot scheduler stopped")
+            except Exception as e:
+                logger.error("Failed to stop scheduler: %s", e)
+        
+        if self.application:
+            try:
+                self.application.stop()
+                logger.info("Telegram bot polling stopped")
+            except Exception as e:
+                logger.error("Failed to stop Telegram bot: %s", e)
+        
+        logger.info("Telegram bot shutdown completed")
 
 
 async def run_bot_async():
