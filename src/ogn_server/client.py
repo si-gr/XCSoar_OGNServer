@@ -135,6 +135,10 @@ class OGNClient:
             return False
     
     def _update_climb_history(self, address: str, timestamp: datetime.datetime, climb_rate: float, ground_speed: float, track: float):
+        # Strip timezone info to make timestamps naive (consistent with _cleanup_old_beacons pattern)
+        if timestamp.tzinfo is not None:
+            timestamp = timestamp.replace(tzinfo=None)
+        
         current_time = datetime.datetime.utcnow()
         cutoff_time = current_time - datetime.timedelta(seconds=60)
         

@@ -35,11 +35,7 @@ class Beacon:
         result = base_fields
         if avg_climb is not None:
             result += f",{round(avg_climb, 1)}"
-        else:
-            result += ",0"
         if is_circling is not None:
             result += f",{'C' if is_circling else '.'}"
-        else:
-            result += ",."
         
         return result + "\n"
