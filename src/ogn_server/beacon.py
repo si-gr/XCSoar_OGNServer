@@ -18,7 +18,7 @@ class Beacon:
     def __eq__(self, other):
         return self.address == other.address
 
-    def to_csv_row(self, nickname: str = "") -> str:
+    def to_csv_row(self, nickname: str = "", avg_climb: float | None = None) -> str:
         display_name = nickname if nickname else self.name
         return (
             f"{display_name},"
@@ -29,5 +29,5 @@ class Beacon:
             f"{round(self.ground_speed)},"
             f"{round(self.climb_rate, 1)},"
             f"{round(self.reference_timestamp.timestamp())},"
-            f"{self.beacon_type}\n"
-        )
+            f"{self.beacon_type}"
+        ) + (f",{round(avg_climb, 1)}\n" if avg_climb is not None else "\n")

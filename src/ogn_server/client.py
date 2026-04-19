@@ -35,6 +35,7 @@ class OGNClient:
         self._cache_ttl_seconds = 5
         self._error_count = 0
         self._last_error_time = 0
+        self._climb_history: dict[str, list[tuple[datetime.datetime, float]]] = {}
         # Track the AprsClient instance to allow graceful shutdowns
         self.client = None
     
@@ -132,6 +133,27 @@ class OGNClient:
         except (ValueError, IndexError):
             return False
     
+    def _update_climb_history(self, address: str, timestamp: datetime.datetime, climb_rate: float):
+        current_time = datetime.datetime.utcnow()
+        cutoff_time = current_time - datetime.timedelta(seconds=60)
+        
+        if address not in self._climb_history:
+            self._climb_history[address] = []
+        
+        self._climb_history[address].append((timestamp, climb_rate))
+        self._climb_history[address] = [
+            entry for entry in self._climb_history[address] 
+            if entry[0] >= cutoff_time
+        ]
+    
+    def _get_avg_climb_rate(self, address: str) -> float | None:
+        if address not in self._climb_history or not self._climb_history[address]:
+            return None
+        
+        total_climb = sum(entry[1] for entry in self._climb_history[address])
+        count = len(self._climb_history[address])
+        return total_climb / count
+    
     def _cleanup_old_beacons(self):
         import time
         if time.time() > self.timestamp + Config.CLEANUP_INTERVAL_SECONDS:
@@ -142,8 +164,13 @@ class OGNClient:
                 if ref_ts.tzinfo is not None:
                     ref_ts = ref_ts.replace(tzinfo=None)
                 age = (datetime.datetime.utcnow() - ref_ts).total_seconds()
-                if age > Config.BEACON_TIMEOUT_SECONDS:
+                should_remove = age > Config.BEACON_TIMEOUT_SECONDS
+                if not should_remove and self.current_messages[i].climb_rate == 0:
+                    should_remove = age > Config.BEACON_ZERO_VELOCITY_TIMEOUT_SECONDS
+                if should_remove:
+                    address = self.current_messages[i].address
                     self.current_messages.pop(i)
+                    del self._climb_history[address]
                     i -= 1
                 i += 1
             if time.time() > self.igc_cleanup_timestamp + 3600:
@@ -206,6 +233,8 @@ class OGNClient:
                     self.current_messages[ind] = current_beacon
                 except ValueError:
                     self.current_messages.append(current_beacon)
+                
+                self._update_climb_history(beacon["address"], beacon["reference_timestamp"], beacon["climb_rate"])
         
         if "address" in beacon:
             self._write_igc_file(beacon)
@@ -231,7 +260,8 @@ class OGNClient:
                 if abs(float(msg.longitude) - center_lon) < 0.5:
                     nickname = self._get_nickname(msg.name)
                     if nickname is not None:
-                        filtered_messages.append(msg.to_csv_row(nickname))
+                        avg_climb = self._get_avg_climb_rate(msg.address)
+                        filtered_messages.append(msg.to_csv_row(nickname, avg_climb))
         
         count = len(filtered_messages)
         header = f"{count},{count}\n"

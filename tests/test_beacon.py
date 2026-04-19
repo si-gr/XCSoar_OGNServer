@@ -173,3 +173,46 @@ class TestBeacon:
         result = beacon.to_csv_row("")
         
         assert result.startswith("TEST,")
+    
+    def test_to_csv_row_with_avg_climb(self):
+        ts = datetime(2024, 1, 15, 10, 30, 45)
+        beacon = Beacon(
+            address="FLR123456",
+            name="TEST",
+            latitude=47.5,
+            longitude=13.0,
+            track=180.0,
+            altitude=1500.0,
+            ground_speed=100.0,
+            climb_rate=2.5,
+            reference_timestamp=ts,
+            beacon_type="^"
+        )
+        
+        result = beacon.to_csv_row("NICK", avg_climb=1.5)
+        
+        assert "NICK," in result
+        assert "1.5\n" in result
+        fields = result.rstrip('\n').split(',')
+        assert len(fields) == 10
+    
+    def test_to_csv_row_without_avg_climb(self):
+        ts = datetime(2024, 1, 15, 10, 30, 45)
+        beacon = Beacon(
+            address="FLR123 spTimeout456",
+            name="TEST",
+            latitude=47.5,
+            longitude=13.0,
+            track=180.0,
+            altitude=1500.0,
+            ground_speed=100.0,
+            climb_rate=2.5,
+            reference_timestamp=ts,
+            beacon_type="^"
+        )
+        
+        result = beacon.to_csv_row("NICK")
+        
+        assert "NICK," in result
+        fields = result.rstrip('\n').split(',')
+        assert len(fields) == 9

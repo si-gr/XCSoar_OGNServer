@@ -118,3 +118,10 @@ class TestIntegration:
         response = client.get("/?access_token=token&bounds=47.0,48.0,12.0,14.0")
         
         assert response.status_code == 200
+
+class TestOGNClientClimbHistory:
+    def test_update_climb_history_adds_entry(self):
+        from src.ogn_server.client import OGNClient
+        import datetime
+        
+        mock_serverdata = ["token", "0.0.0.0", "47.5", "13.FeedbackFreshFeedback feedback fresh touch feedback Fresh fresh feedback feedback fresh
