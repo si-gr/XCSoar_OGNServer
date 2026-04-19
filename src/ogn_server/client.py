@@ -1,3 +1,4 @@
+import math
 import os
 import datetime
 import logging
@@ -35,7 +36,7 @@ class OGNClient:
         self._cache_ttl_seconds = 5
         self._error_count = 0
         self._last_error_time = 0
-        self._climb_history: dict[str, list[tuple[datetime.datetime, float]]] = {}
+        self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
         # Track the AprsClient instance to allow graceful shutdowns
         self.client = None
     
@@ -133,14 +134,14 @@ class OGNClient:
         except (ValueError, IndexError):
             return False
     
-    def _update_climb_history(self, address: str, timestamp: datetime.datetime, climb_rate: float):
+    def _update_climb_history(self, address: str, timestamp: datetime.datetime, climb_rate: float, ground_speed: float, track: float):
         current_time = datetime.datetime.utcnow()
         cutoff_time = current_time - datetime.timedelta(seconds=60)
         
         if address not in self._climb_history:
             self._climb_history[address] = []
         
-        self._climb_history[address].append((timestamp, climb_rate))
+        self._climb_history[address].append((timestamp, climb_rate, ground_speed, track))
         self._climb_history[address] = [
             entry for entry in self._climb_history[address] 
             if entry[0] >= cutoff_time
@@ -153,6 +154,40 @@ class OGNClient:
         total_climb = sum(entry[1] for entry in self._climb_history[address])
         count = len(self._climb_history[address])
         return total_climb / count
+    
+    def _is_circling(self, address: str) -> bool:
+        """Determine if a glider is actively cirling in a thermal.
+        
+        Criteria (all must be met over 60 seconds of history):
+        1. Track variance < 30° (circular std dev for 359°/1° boundary)
+        2. Ground speed < 30 km/h
+        3. Average climb > 0.5 m/s
+        """
+        if address not in self._climb_history or len(self._climb_history[address]) < 60:
+            return False
+        
+        history = self._climb_history[address]
+        
+        # Calculate average climb rate
+        avg_climb = sum(entry[1] for entry in history) / len(history)
+        if avg_climb <= 0.5:
+            return False
+        
+        # Check ground speed constraint
+        ground_speeds = [entry[2] for entry in history]
+        if any(gs >= 30 for gs in ground_speeds):
+            return False
+        
+        # Calculate circular standard deviation for track
+        tracks_rad = [entry[3] * (2 * math.pi / 360) for entry in history]
+        sin_mean = sum(math.sin(tr) for tr in tracks_rad) / len(tracks_rad)
+        cos_mean = sum(math.cos(tr) for tr in tracks_rad) / len(tracks_rad)
+        circ_std_dev = math.sqrt(2 * (1 - math.sqrt(sin_mean**2 + cos_mean**2))) * (180 / math.pi)
+        
+        if circ_std_dev >= 30:
+            return False
+        
+        return True
     
     def _cleanup_old_beacons(self):
         import time
@@ -234,7 +269,7 @@ class OGNClient:
                 except ValueError:
                     self.current_messages.append(current_beacon)
                 
-                self._update_climb_history(beacon["address"], beacon["reference_timestamp"], beacon["climb_rate"])
+                self._update_climb_history(beacon["address"], beacon["reference_timestamp"], beacon["climb_rate"], beacon["ground_speed"], beacon["track"])
         
         if "address" in beacon:
             self._write_igc_file(beacon)
@@ -261,7 +296,8 @@ class OGNClient:
                     nickname = self._get_nickname(msg.name)
                     if nickname is not None:
                         avg_climb = self._get_avg_climb_rate(msg.address)
-                        filtered_messages.append(msg.to_csv_row(nickname, avg_climb))
+                        is_circling = self._is_circling(msg.address)
+                        filtered_messages.append(msg.to_csv_row(nickname, avg_climb, is_circling))
         
         count = len(filtered_messages)
         header = f"{count},{count}\n"

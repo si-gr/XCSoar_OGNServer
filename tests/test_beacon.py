@@ -197,9 +197,9 @@ class TestBeacon:
         assert len(fields) == 10
     
     def test_to_csv_row_without_avg_climb(self):
-        ts = datetime(2024, 1, 15, 10, 30, 45)
+        ts = datetime(2024, 1, 1, 10, 30, 45)
         beacon = Beacon(
-            address="FLR123 spTimeout456",
+            address="FLR123456",
             name="TEST",
             latitude=47.5,
             longitude=13.0,
@@ -216,3 +216,71 @@ class TestBeacon:
         assert "NICK," in result
         fields = result.rstrip('\n').split(',')
         assert len(fields) == 9
+    
+    def test_to_csv_row_with_is_circling_true(self):
+        ts = datetime(2024, 1, 15, 10, 30, 45)
+        beacon = Beacon(
+            address="FLR123456",
+            name="TEST",
+            latitude=47.5,
+            longitude=13.0,
+            track=180.0,
+            altitude=1500.0,
+            ground_speed=100.0,
+            climb_rate=2.5,
+            reference_timestamp=ts,
+            beacon_type="^"
+        )
+        
+        result = beacon.to_csv_row("NICK", avg_climb=1.5, is_circling=True)
+        
+        assert "NICK," in result
+        assert "1.5," in result
+        assert "C\n" in result
+        fields = result.rstrip('\n').split(',')
+        assert len(fields) == 11
+    
+    def test_to_csv_row_with_is_circling_false(self):
+        ts = datetime(2024, 1, 15, 10, 30, 45)
+        beacon = Beacon(
+            address="FLR123456",
+            name="TEST",
+            latitude=47.5,
+            longitude=13.0,
+            track=180.0,
+            altitude=1500.0,
+            ground_speed=100.0,
+            climb_rate=2.5,
+            reference_timestamp=ts,
+            beacon_type="^"
+        )
+        
+        result = beacon.to_csv_row("NICK", avg_climb=1.5, is_circling=False)
+        
+        assert "NICK," in result
+        assert "1.5," in result
+        assert ".\n" in result
+        fields = result.rstrip('\n').split(',')
+        assert len(fields) == 11
+    
+    def test_to_csv_row_with_only_is_circling(self):
+        ts = datetime(2024, 1, 15, 10, 30, 45)
+        beacon = Beacon(
+            address="FLR123456",
+            name="TEST",
+            latitude=47.5,
+            longitude=13.0,
+            track=180.0,
+            altitude=1500.0,
+            ground_speed=100.0,
+            climb_rate=2.5,
+            reference_timestamp=ts,
+            beacon_type="^"
+        )
+        
+        result = beacon.to_csv_row("NICK", is_circling=True)
+        
+        assert "NICK," in result
+        assert "C\n" in result
+        fields = result.rstrip('\n').split(',')
+        assert len(fields) == 10
