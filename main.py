@@ -63,16 +63,8 @@ def main():
     except Exception:
         pass
     telegram_bot = TelegramBot()
-    bot_thread = threading.Thread(target=telegram_bot.run)
-    bot_thread.daemon = True
-    bot_thread.start()
-    try:
-        setattr(telegram_bot, "restart_thread", bot_thread)
-    except Exception:
-        pass
     setup_signal_handlers(ogn_client, telegram_bot)
-    thread.join()
-    bot_thread.join()
+    telegram_bot.run()
 
 
 if __name__ == "__main__":
