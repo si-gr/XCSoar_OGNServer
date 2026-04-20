@@ -163,9 +163,7 @@ class OGNClient:
         """Determine if a glider is actively cirling in a thermal.
         
         Criteria (all must be met over 60 seconds of history):
-        1. Track variance < 30° (circular std dev for 359°/1° boundary)
-        2. Ground speed < 30 km/h
-        3. Average climb > 0.5 m/s
+        1. Average climb > 0.5 m/s
         """
         if address not in self._climb_history or len(self._climb_history[address]) < 60:
             return False
@@ -176,21 +174,7 @@ class OGNClient:
         avg_climb = sum(entry[1] for entry in history) / len(history)
         if avg_climb <= 0.5:
             return False
-        
-        # Check ground speed constraint
-        ground_speeds = [entry[2] for entry in history]
-        if any(gs >= 30 for gs in ground_speeds):
-            return False
-        
-        # Calculate circular standard deviation for track
-        tracks_rad = [entry[3] * (2 * math.pi / 360) for entry in history]
-        sin_mean = sum(math.sin(tr) for tr in tracks_rad) / len(tracks_rad)
-        cos_mean = sum(math.cos(tr) for tr in tracks_rad) / len(tracks_rad)
-        circ_std_dev = math.sqrt(2 * (1 - math.sqrt(sin_mean**2 + cos_mean**2))) * (180 / math.pi)
-        
-        if circ_std_dev >= 30:
-            return False
-        
+                
         return True
     
     def _cleanup_old_beacons(self):
