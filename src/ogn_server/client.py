@@ -90,6 +90,11 @@ class OGNClient:
         
         ddb_registration = get_registration(flarm_id, self.ddb_devices)
         if ddb_registration:
+            matches = self.names_df[self.names_df["fid"] == ddb_registration]
+            if len(matches) > 0:
+                nickname = matches["name"].iloc[0]
+                if nickname != '....':
+                    return nickname
             return ddb_registration
         
         matches = self.names_df[self.names_df["fid"] == lookup_key]
