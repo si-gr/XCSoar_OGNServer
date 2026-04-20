@@ -53,7 +53,7 @@ def main():
     thread = threading.Thread(target=ogn_client.run, kwargs={"autoreconnect": True})
     thread.daemon = True
     thread.start()
-    telegram_bot = TelegramBot()
+    telegram_bot = TelegramBot(ogn_client=ogn_client)
     setup_signal_handlers(ogn_client, telegram_bot)
     telegram_bot.run()
 

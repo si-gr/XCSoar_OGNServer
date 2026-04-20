@@ -16,11 +16,12 @@ from .config import Config
 
 
 class TelegramBot:
-    def __init__(self):
+    def __init__(self, ogn_client=None):
         self.filename = Config.NAMES_FILE
         self.admin_id = Config.load_admin_chat_id()
         self.token = Config.load_private_key()
         self.application = None
+        self.ogn_client = ogn_client
     
     async def add(self, update: Update, context: CallbackContext):
         if update.effective_user.id != int(self.admin_id):
@@ -65,8 +66,28 @@ class TelegramBot:
                 await update.message.reply_markdown_v2(
                     "not found " + context.args[0].replace(".", "\\.")
                 )
-    
-    
+
+    async def refresh_ddb(self, update: Update, context: CallbackContext):
+        if update.effective_user.id != int(self.admin_id):
+            return
+        if update.message is None:
+            return
+
+        if self.ogn_client is None:
+            await update.message.reply_text("DDB refresh unavailable: no client reference")
+            return
+
+        try:
+            count = self.ogn_client.refresh_ddb_devices()
+            await update.message.reply_markdown_v2(
+                rf"DDB refreshed: *{count}* devices loaded"
+            )
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"DDB refresh failed: {e}")
+            await update.message.reply_markdown_v2(
+                rf"DDB refresh failed\: *{str(e)}*"
+            )
     
     
     
@@ -85,10 +106,12 @@ class TelegramBot:
         
         add_handler = CommandHandler('a', self.add)
         del_handler = CommandHandler('d', self.delete)
+        refresh_handler = CommandHandler('refreshddb', self.refresh_ddb)
         
         
         self.application.add_handler(add_handler)
         self.application.add_handler(del_handler)
+        self.application.add_handler(refresh_handler)
         
         self.application.run_polling()
     

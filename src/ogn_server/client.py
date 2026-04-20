@@ -46,6 +46,12 @@ class OGNClient:
         self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
         # Track the AprsClient instance to allow graceful shutdowns
         self.client = None
+
+    def refresh_ddb_devices(self) -> int:
+        """Refresh the FLARM device database. Returns number of devices loaded."""
+        self.ddb_devices = get_ddb_devices()
+        logger.info(f"DDB refreshed: {len(self.ddb_devices)} devices")
+        return len(self.ddb_devices)
     
     def _load_names_df(self):
         names_path = Path(Config.NAMES_FILE)
