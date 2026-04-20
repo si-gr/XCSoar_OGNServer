@@ -9,6 +9,7 @@ An OGN (Open Glider Network) server for XCSoar that connects to the glidernet.or
 - Writes IGC flight recording files
 - Telegram bot for managing glider names
 - Web API for XCSoar to retrieve live beacon data
+- **DDB Integration**: Automatic download of FLARM Device Database on startup, using aircraft registration as primary display name
 
 ## Quick Start (Docker Compose)
 
@@ -72,6 +73,22 @@ fid,name
 FLR123456,John Doe
 FLR789012,Jane Smith
 ```
+
+### DDB (FLARM Device Database)
+
+The server automatically downloads the FLARM Device Database from [glidernet.org](https://github.com/glidernet/ogn-ddb) on startup. This provides automatic registration lookup for known gliders.
+
+**Name resolution priority:**
+1. **DDB registration** (e.g., "D-1234") - downloaded automatically
+2. **names.csv nickname** (e.g., "John Doe") - user-defined via Telegram bot
+3. **FLARM ID suffix** (last 4 chars) - fallback if neither available
+
+**Cache behavior:**
+- Downloaded DDB is cached in `ddb.json`
+- Cache TTL: 60 minutes (re-downloaded after expiry)
+- If DDB download fails, server starts with names.csv only and retries DDB in background
+
+**Rate limiting:** The DDB API enforces rate limits. If 429 Too Many Requests is received, the server waits and retries up to 3 times before falling back to names.csv.
 
 ## API
 

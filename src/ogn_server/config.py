@@ -26,6 +26,13 @@ class Config:
     
     IGC_RETENTION_DAYS = 30
     
+    # DDB (FLARM Device Database) configuration
+    DDB_URL = "http://ddb.glidernet.org/download/?j=1&t=1"
+    DDB_CACHE_FILE = "ddb.json"
+    DDB_CACHE_TTL_MINUTES = 60
+    DDB_TIMEOUT_SECONDS = 30
+    DDB_MAX_RETRIES = 5
+    DDB_RETRY_BACKOFF_BASE_SECONDS = 2
     
     API_ACCESS_TOKEN_INDEX = 0
     API_HOST_INDEX = 1

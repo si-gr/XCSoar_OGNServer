@@ -13,6 +13,7 @@ from ogn.parser import parse, AprsParseError
 
 from .beacon import Beacon
 from .config import Config
+from .ddb import get_ddb_devices, get_registration
 from .formatters import JSONFormatter, logger
 
 # Initialize module-level JSON-formatted logger
@@ -33,6 +34,11 @@ class OGNClient:
         self.names_df = pd.DataFrame()
         self.names_df_time = 0
         self._load_names_df()
+        
+        # DDB (FLARM Device Database) initialization
+        self.ddb_devices = get_ddb_devices()
+        logger.info(f"DDB loaded: {len(self.ddb_devices)} devices")
+        
         self._cache: dict = {}
         self._cache_ttl_seconds = 5
         self._error_count = 0
@@ -65,14 +71,34 @@ class OGNClient:
             except OSError:
                 pass
     
-    def _get_nickname(self, beacon_name: str) -> Optional[str]:
-        all_nicknames = self.names_df[self.names_df["fid"] == beacon_name]
-        if len(all_nicknames) > 0:
-            nickname = all_nicknames["name"].iloc[0]
-            if nickname == '....':
-                return None
-            return nickname
-        return beacon_name
+    def _get_nickname(self, flarm_id: str) -> Optional[str]:
+        """
+        Resolve display name for a beacon using FLARM ID.
+        
+        Priority:
+        1. DDB registration (from FLARM Device Database)
+        2. names.csv nickname (user-defined via Telegram bot)
+        3. Raw input (truncated to last 4 chars if full ID)
+        
+        Args:
+            flarm_id: Full FLARM ID (e.g., "FLR3ECA1B") or partial ID
+        
+        Returns:
+            Display name string or None
+        """
+        lookup_key = flarm_id[-4:].upper() if len(flarm_id) > 4 else flarm_id.upper()
+        
+        ddb_registration = get_registration(flarm_id, self.ddb_devices)
+        if ddb_registration:
+            return ddb_registration
+        
+        matches = self.names_df[self.names_df["fid"] == lookup_key]
+        if len(matches) > 0:
+            nickname = matches["name"].iloc[0]
+            if nickname != '....':
+                return nickname
+        
+        return lookup_key
     
     def _is_valid_symbol(self, symbolcode: str) -> bool:
         invalid_symbols = ['n', 'X', '^', 'g']
@@ -289,7 +315,7 @@ class OGNClient:
         for msg in self.current_messages:
             if abs(float(msg.latitude) - center_lat) < 0.5:
                 if abs(float(msg.longitude) - center_lon) < 0.5:
-                    nickname = self._get_nickname(msg.name)
+                    nickname = self._get_nickname(msg.address)
                     if nickname is not None:
                         avg_climb = self._get_avg_climb_rate(msg.address)
                         is_circling = self._is_circling(msg.address)
