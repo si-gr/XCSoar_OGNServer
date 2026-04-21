@@ -177,7 +177,7 @@ class OGNClient:
             timestamp = timestamp.replace(tzinfo=None)
         
         current_time = datetime.datetime.utcnow()
-        cutoff_time = current_time - datetime.timedelta(seconds=60)
+        cutoff_time = current_time - datetime.timedelta(seconds=30)
         
         if address not in self._climb_history:
             self._climb_history[address] = []
@@ -199,10 +199,10 @@ class OGNClient:
     def _is_circling(self, address: str) -> bool:
         """Determine if a glider is actively cirling in a thermal.
         
-        Criteria (all must be met over 60 seconds of history):
+        Criteria (all must be met over 30 seconds of history):
         1. Average climb > 0.5 m/s
         """
-        if address not in self._climb_history or len(self._climb_history[address]) < 60:
+        if address not in self._climb_history or len(self._climb_history[address]) < 30:
             return False
         
         history = self._climb_history[address]
@@ -210,6 +210,16 @@ class OGNClient:
         # Calculate average climb rate
         avg_climb = sum(entry[1] for entry in history) / len(history)
         if avg_climb <= 0.5:
+            return False
+
+        if history[-1][3] is not None and history[-2][3] is not None:
+            track_change = abs(history[-1][3] - history[-2][3])
+            if track_change > 180:
+                track_change = 360 - track_change
+            if track_change < 10:
+                return False
+        
+        if history[-1][1] is not None and history[-1][1] < 0.2:
             return False
                 
         return True
