@@ -118,8 +118,16 @@ Jane,47.52345,13.02345,90,1600,120,1.5,1705312246,>
 
 ## Telegram Bot Commands
 
+### Admin Commands
+
 - `/a <fid>,<name>` - Add a new glider name (e.g., `/a FLR123456,John Doe`)
 - `/d <fid>` - Delete a glider name (e.g., `/d FLR123456`)
+- `/refreshddb` - Refresh FLARM Device Database from glidernet.org
+- `/igc` - Request IGC flight files (interactive conversation)
+  - Shows list of available aircraft with IGC files
+  - Select aircraft → Select date → Receive IGC file(s)
+  - Supports cancel (`Cancel` button or `/cancel`) and back navigation at any step
+  - 5-minute conversation timeout for inactive sessions
 
 Changes to `names.csv` are persisted to the host file via Docker volume mount.
 

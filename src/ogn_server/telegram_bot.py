@@ -3,16 +3,115 @@ import os
 import signal
 from datetime import datetime
 from pathlib import Path
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackContext,
     CommandHandler,
     MessageHandler,
     filters,
+    ConversationHandler,
+    CallbackQueryHandler,
 )
 
 from .config import Config
+
+
+# IGC File Request Conversation States
+SELECTING_AIRCRAFT = 1
+SELECTING_DATE = 2
+SENDING_FILE = 3
+CONVERSATION_TIMEOUT = 300  # 5 minutes
+
+
+def format_size(num_bytes: int) -> str:
+    """Format a byte count into a human readable size string."""
+    if num_bytes < 1024:
+        return f"{num_bytes}B"
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes/1024:.1f}KB"
+    return f"{num_bytes/1024/1024:.1f}MB"
+
+
+def scan_igc_files() -> dict[str, list[str]]:
+    """
+    Scans IGC_FOLDER for .igc files.
+    
+    Returns:
+        Dictionary mapping aircraft nickname to list of dates (YYYYMMDD).
+        Example: {
+            "Test Pilot": ["20260419", "20260420"],
+            "John Doe": ["20260418"]
+        }
+    
+    Raises:
+        No specific exceptions - returns empty dict if no files.
+    """
+    igc_root = Path(Config.IGC_FOLDER)
+    result: dict[str, set[str]] = {}
+
+    if not igc_root.exists():
+        return {}
+
+    for f in igc_root.glob("*.igc"):
+        name = f.name
+        if not name.lower().endswith(".igc"):
+            continue
+        base = name[:-4]  # drop .igc
+        if len(base) < 8:
+            continue
+        date_part = base[:8]
+        if not date_part.isdigit():
+            continue
+        nickname = base[8:].strip()
+        if nickname == "":
+            continue
+        result.setdefault(nickname, set()).add(date_part)
+
+    # convert sets to sorted lists (newest first)
+    finalized: dict[str, list[str]] = {}
+    for nick, dates in result.items():
+        finalized[nick] = sorted(list(dates), reverse=True)
+    return finalized
+
+
+def _build_aircraft_keyboard(aircraft_list: list[str]) -> InlineKeyboardMarkup:
+    """Build inline keyboard with aircraft buttons in rows of 2. Includes Cancel button."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for ac in aircraft_list:
+        row.append(InlineKeyboardButton(ac, callback_data=f"aircraft:{ac}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        # append the last row with a single button
+        buttons.append(row)
+    # Cancel button in its own final row
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def _build_date_keyboard(dates_list: list[str], aircraft: str) -> InlineKeyboardMarkup:
+    """Build inline keyboard with date buttons (YYYY-MM-DD) in rows of 2. Includes Back and Cancel."""
+    rows: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for d in dates_list:
+        disp = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+        row.append(InlineKeyboardButton(disp, callback_data=f"date:{d}:{aircraft}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        while len(row) < 2:
+            row.append(InlineKeyboardButton("", callback_data="noop"))
+        rows.append(row)
+    # Back and Cancel row
+    rows.append([
+        InlineKeyboardButton("◀ Back", callback_data="back"),
+        InlineKeyboardButton("Cancel", callback_data="cancel"),
+    ])
+    return InlineKeyboardMarkup(rows)
 
 
 class TelegramBot:
@@ -88,6 +187,123 @@ class TelegramBot:
             await update.message.reply_markdown_v2(
                 rf"DDB refresh failed\: *{str(e)}*"
             )
+
+    async def igc_command(self, update: Update, context: CallbackContext) -> int:
+        """Entry point for /igc command. Starts IGC file request conversation."""
+        if update.effective_user.id != int(self.admin_id):
+            return ConversationHandler.END
+        chat_id = update.message.chat_id if update.message is not None else (update.effective_chat.id if update.effective_chat else None)
+        if chat_id is None:
+            return ConversationHandler.END
+
+        try:
+            if update.message is not None:
+                await update.message.reply_text("Loading aircraft...")
+            else:
+                await context.bot.send_message(chat_id=chat_id, text="Loading aircraft...")
+        except Exception:
+            pass
+
+        aircraft_data = scan_igc_files()
+        if not aircraft_data:
+            if update.message is not None:
+                await update.message.reply_text("No IGC files available yet")
+            else:
+                await context.bot.send_message(chat_id=chat_id, text="No IGC files available yet")
+            return ConversationHandler.END
+
+        context.chat_data['aircraft_data'] = aircraft_data
+        aircraft_list = sorted(list(aircraft_data.keys()))
+        keyboard = _build_aircraft_keyboard(aircraft_list)
+        if update.message is not None:
+            await update.message.reply_text("Please select aircraft:", reply_markup=keyboard)
+        else:
+            await context.bot.send_message(chat_id=chat_id, text="Please select aircraft:", reply_markup=keyboard)
+        return SELECTING_AIRCRAFT
+
+    async def aircraft_selected(self, update: Update, context: CallbackContext) -> int:
+        """Handles aircraft selection from inline keyboard."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data or ""
+        if data == "cancel":
+            await query.edit_message_text("Cancelled")
+            context.chat_data.clear()
+            return ConversationHandler.END
+        if data == "back":
+            return await self.igc_command(update, context)
+        if not data.startswith("aircraft:"):
+            return SELECTING_AIRCRAFT
+
+        aircraft = data[len("aircraft:") :]
+        context.chat_data['selected_aircraft'] = aircraft
+        aircraft_data = context.chat_data.get('aircraft_data', {})
+        dates = aircraft_data.get(aircraft, [])
+        if not dates:
+            await query.edit_message_text("No IGC files for selected aircraft")
+            context.chat_data.clear()
+            return ConversationHandler.END
+        keyboard = _build_date_keyboard(dates, aircraft)
+        await query.edit_message_text("Please select a date:", reply_markup=keyboard)
+        return SELECTING_DATE
+
+    async def date_selected(self, update: Update, context: CallbackContext) -> int:
+        """Handles date selection and sends IGC files as documents."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data or ""
+        if data == "cancel":
+            await query.edit_message_text("Cancelled")
+            context.chat_data.clear()
+            return ConversationHandler.END
+        if data == "back":
+            aircraft = context.chat_data.get('selected_aircraft')
+            if not aircraft:
+                return ConversationHandler.END
+            aircraft_list = sorted(list(context.chat_data.get('aircraft_data', {}).keys()))
+            keyboard = _build_aircraft_keyboard(aircraft_list)
+            await query.edit_message_text("Please select aircraft:", reply_markup=keyboard)
+            return SELECTING_AIRCRAFT
+        if not data.startswith("date:"):
+            return SELECTING_DATE
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            return SELECTING_DATE
+        _, ymd, aircraft = parts
+        igc_root = Path(Config.IGC_FOLDER)
+        pattern = f"{ymd}{aircraft}*.igc"
+        files = sorted(list(igc_root.glob(pattern)))
+        if not files:
+            await query.edit_message_text("File not found")
+            return ConversationHandler.END
+        total_size = sum(p.stat().st_size for p in files)
+        await query.edit_message_text(f"Sending {len(files)} file(s) ({format_size(total_size)})...")
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if chat_id is None:
+            return ConversationHandler.END
+        for fpath in files:
+            try:
+                with open(fpath, 'rb') as fh:
+                    await context.bot.send_document(chat_id=chat_id, document=fh, filename=fpath.name)
+            except Exception as e:
+                logging.getLogger(__name__).warning(f"Failed to send IGC file {fpath}: {e}")
+        return ConversationHandler.END
+
+    async def cancel_igc(self, update: Update, context: CallbackContext) -> int:
+        """Cancels the current IGC conversation."""
+        if update.callback_query is not None:
+            try:
+                await update.callback_query.answer()
+            except Exception:
+                pass
+            try:
+                await update.callback_query.edit_message_text("Cancelled")
+            except Exception:
+                pass
+        elif update.message is not None:
+            await update.message.reply_text("Cancelled")
+        context.chat_data.clear()
+        return ConversationHandler.END
     
     
     
@@ -100,7 +316,7 @@ class TelegramBot:
             print("Telegram bot token not found")
             return
         
-    # Daily restart scheduler removed
+        # Daily restart scheduler removed
         
         self.application = Application.builder().token(self.token).build()
         
@@ -108,10 +324,26 @@ class TelegramBot:
         del_handler = CommandHandler('d', self.delete)
         refresh_handler = CommandHandler('refreshddb', self.refresh_ddb)
         
-        
         self.application.add_handler(add_handler)
         self.application.add_handler(del_handler)
         self.application.add_handler(refresh_handler)
+        
+        # IGC file request conversation
+        igc_conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('igc', self.igc_command)],
+            states={
+                SELECTING_AIRCRAFT: [CallbackQueryHandler(self.aircraft_selected, pattern=r"^aircraft:.*")],
+                SELECTING_DATE: [CallbackQueryHandler(self.date_selected, pattern=r"^date:.*")],
+            },
+            fallbacks=[
+                CommandHandler('cancel', self.cancel_igc),
+                CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
+            ],
+            per_user=True,
+            conversation_timeout=CONVERSATION_TIMEOUT,
+        )
+
+        self.application.add_handler(igc_conv_handler)
         
         self.application.run_polling()
     
