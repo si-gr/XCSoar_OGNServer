@@ -151,9 +151,9 @@ class TelegramBot:
         commands_text = (
             "\\*Available Commands:\\*\\n\\n"
             "/start \\- Show available commands\\n"
-            "/a <fid,name> \\- Add a glider to name mapping\\n"
+"/a \\<fid,name\\> \\- Add a glider to name mapping\\n"
             "   Example: `/a FLR123456,John Doe`\\n\\n"
-            "/d <fid> \\- Remove a glider from name mapping\\n"
+"/d \\<fid\\> \\- Remove a glider from name mapping\\n"
             "   Example: `/d FLR123456`\\n\\n"
             "/refreshddb \\- Refresh the FLARM device database\\n"
             "   Downloads latest data from glidernet.org\\n\\n"
@@ -173,7 +173,7 @@ class TelegramBot:
                 return
             if context.args is None or len(context.args) != 1:
                 await update.message.reply_markdown_v2(
-                    "Usage: /a <fid,name>\\nExample: `/a FLR123456,John Doe`"
+"Usage: /a \\<fid,name\\>\\nExample: `/a FLR123456,John Doe`"
                 )
                 return
             if len(context.args[0]) > 0 and "," in context.args[0]:
@@ -184,7 +184,7 @@ class TelegramBot:
                 )
             else:
                 await update.message.reply_markdown_v2(
-                    "Usage: /a <fid,name>\\nExample: `/a FLR123456,John Doe`"
+"Usage: /a \\<fid,name\\>\\nExample: `/a FLR123456,John Doe`"
                 )
         except Exception as e:
             if update and update.message:
@@ -200,7 +200,7 @@ class TelegramBot:
                 return
             if context.args is None or len(context.args) != 1:
                 await update.message.reply_markdown_v2(
-                    "Usage: /d <fid>\\nExample: `/d FLR123456`"
+"Usage: /d \\<fid\\>\\nExample: `/d FLR123456`"
                 )
                 return
             fid = context.args[0]
