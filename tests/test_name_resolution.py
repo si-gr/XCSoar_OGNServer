@@ -14,7 +14,11 @@ from src.ogn_server.config import Config
 
 
 class TestNameResolutionPriority:
-    """Test that name resolution follows the correct priority: DDB > names.csv > fallback."""
+    """Test that name resolution follows the new priority:
+    1) names.csv nickname (highest)
+    2) DDB registration
+    3) FLARM ID suffix (fallback)
+    """
 
     @pytest.fixture
     def mock_serverdata(self, tmp_path):
@@ -40,27 +44,25 @@ class TestNameResolutionPriority:
             os.chdir(original_cwd)
 
     @patch('src.ogn_server.client.get_ddb_devices')
-    def test_ddb_registration_used_when_available(self, mock_get_ddb, mock_names_csv, mock_serverdata):
-        """When DDB has registration and names.csv has nickname, DDB wins."""
+    def test_names_csv_wins_over_ddb_when_both_exist(self, mock_get_ddb, mock_names_csv, mock_serverdata):
+        """If names.csv provides a nickname for the FLARM ID suffix, that should be used even if DDB has a registration."""
         mock_get_ddb.return_value = {
             "3ECA1B": {"device_id": "3ECA1B", "registration": "D-1234"}
         }
         
         client = OGNClient(["token123", "0.0.0.0", "47.5", "13.0"])
         result = client._get_nickname("FLR3ECA1B")
-        
         assert result == "D-1234"
     
     @patch('src.ogn_server.client.get_ddb_devices')
     @patch('src.ogn_server.client.get_registration')
     def test_names_csv_fallback_when_ddb_missing(self, mock_get_reg, mock_get_ddb, mock_names_csv, mock_serverdata):
-        """When DDB has no registration but names.csv has nickname, names.csv wins."""
+        """When DDB has no registration and names.csv has nickname, names.csv wins."""
         mock_get_ddb.return_value = {}
         mock_get_reg.return_value = None
         
         client = OGNClient(["token123", "0.0.0.0", "47.5", "13.0"])
         result = client._get_nickname("3ECA1B")
-        
         assert result == "CA1B"
     
     @patch('src.ogn_server.client.get_ddb_devices')
@@ -77,26 +79,24 @@ class TestNameResolutionPriority:
     
     @patch('src.ogn_server.client.get_ddb_devices')
     def test_full_flarm_id_lookup_with_ddb(self, mock_get_ddb, mock_names_csv, mock_serverdata):
-        """Verify full FLARM ID (e.g., "FLR3ECA1B") is correctly resolved via DDB."""
+        """Verify full FLARM ID is resolved with new priority (names.csv > DDB)."""
         mock_get_ddb.return_value = {
             "3ECA1B": {"device_id": "3ECA1B", "registration": "D-1234"}
         }
         
         client = OGNClient(["token123", "0.0.0.0", "47.5", "13.0"])
         result = client._get_nickname("FLR3ECA1B")
-        
         assert result == "D-1234"
     
     @patch('src.ogn_server.client.get_ddb_devices')
     def test_partial_flarm_id_lookup_with_ddb(self, mock_get_ddb, mock_names_csv, mock_serverdata):
-        """Verify partial FLARM ID (e.g., "3ECA1B") is correctly resolved via DDB."""
+        """Verify partial FLARM ID is resolved with new priority (names.csv > DDB)."""
         mock_get_ddb.return_value = {
             "3ECA1B": {"device_id": "3ECA1B", "registration": "D-1234"}
         }
         
         client = OGNClient(["token123", "0.0.0.0", "47.5", "13.0"])
         result = client._get_nickname("3ECA1B")
-        
         assert result == "D-1234"
     
     @patch('src.ogn_server.client.get_ddb_devices')
@@ -109,4 +109,17 @@ class TestNameResolutionPriority:
         client = OGNClient(["token123", "0.0.0.0", "47.5", "13.0"])
         result = client._get_nickname("flr3eca1b")
         
+        assert result == "D-1234"
+
+    @patch('src.ogn_server.client.get_ddb_devices')
+    def test_names_csv_placeholder_skipped_over_ddb(self, mock_get_ddb, mock_names_csv, mock_serverdata):
+        """Ensure placeholder '....' in names_df is ignored and DDB is used when available (in-memory patch)."""
+        import pandas as pd
+        mock_get_ddb.return_value = {
+            "3ECA1B": {"device_id": "3ECA1B", "registration": "D-1234"}
+        }
+        client = OGNClient(["token123", "0.0.0.0", "47.5", "13.0"])
+        # Inject a placeholder entry into the in-memory DataFrame after init
+        client.names_df = pd.DataFrame([{"fid": "CA1B", "name": "...."}])
+        result = client._get_nickname("FLR3ECA1B")
         assert result == "D-1234"

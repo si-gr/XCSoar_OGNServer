@@ -3,7 +3,14 @@ import os
 import signal
 from datetime import datetime
 from pathlib import Path
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Update,
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
+)
 from telegram.ext import (
     Application,
     CallbackContext,
@@ -114,6 +121,21 @@ def _build_date_keyboard(dates_list: list[str], aircraft: str) -> InlineKeyboard
     return InlineKeyboardMarkup(rows)
 
 
+async def post_init(application: Application) -> None:
+    """Set up bot commands menu after startup."""
+    bot = application.bot
+    private_commands = [
+        BotCommand("start", "Show available commands"),
+        BotCommand("a", "Add a glider to name mapping"),
+        BotCommand("d", "Remove a glider from name mapping"),
+        BotCommand("refreshddb", "Refresh the FLARM device database"),
+        BotCommand("igc", "Download IGC flight files"),
+        BotCommand("cancel", "Cancel an ongoing operation"),
+    ]
+    group_commands = private_commands.copy()
+    await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+
 class TelegramBot:
     def __init__(self, ogn_client=None):
         self.filename = Config.NAMES_FILE
@@ -122,96 +144,144 @@ class TelegramBot:
         self.application = None
         self.ogn_client = ogn_client
     
-    async def add(self, update: Update, context: CallbackContext):
-        if update.effective_user.id != int(self.admin_id):
-            return
-        if context.args is None or len(context.args) != 1:
-            return
+    async def start(self, update: Update, context: CallbackContext) -> None:
+        """Handle /start command - list all available commands."""
         if update.message is None:
             return
-        
-        if len(context.args[0]) > 0 and "," in context.args[0]:
-            with open(self.filename, "a") as out:
-                out.write(context.args[0] + "\n")
-            await update.message.reply_markdown_v2(
-                "added " + context.args[0].replace(".", "\\.")
-            )
+        commands_text = (
+            "\\*Available Commands:\\*\\n\\n"
+            "/start \\- Show available commands\\n"
+            "/a <fid,name> \\- Add a glider to name mapping\\n"
+            "   Example: `/a FLR123456,John Doe`\\n\\n"
+            "/d <fid> \\- Remove a glider from name mapping\\n"
+            "   Example: `/d FLR123456`\\n\\n"
+            "/refreshddb \\- Refresh the FLARM device database\\n"
+            "   Downloads latest data from glidernet.org\\n\\n"
+            "/igc \\- Download IGC flight files\\n"
+            "   Interactive selection of aircraft and date\\n\\n"
+            "/cancel \\- Cancel an ongoing operation\\n\\n"
+            "\\_Commands marked \\(admin\\) require admin privileges\\_"
+        )
+        await update.message.reply_markdown_v2(commands_text)
     
-    async def delete(self, update: Update, context: CallbackContext):
-        if update.effective_user.id != int(self.admin_id):
-            return
-        if context.args is None or len(context.args) != 1:
-            return
-        if update.message is None:
-            return
-        
-        if len(context.args[0]) > 0:
-            with open(self.filename, "r") as f:
-                all_names = f.readlines()
-            
-            with open(self.filename, "w") as f:
-                deleted = False
-                for n in all_names:
-                    if context.args[0] not in n:
-                        f.write(n)
-                    else:
-                        deleted = True
-            
-            if deleted:
+    async def add(self, update: Update, context: CallbackContext):
+        try:
+            if update.message is None:
+                return
+            if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+                await update.message.reply_markdown_v2("Unauthorized")
+                return
+            if context.args is None or len(context.args) != 1:
                 await update.message.reply_markdown_v2(
-                    "deleted " + context.args[0].replace(".", "\\.")
+                    "Usage: /a <fid,name>\\nExample: `/a FLR123456,John Doe`"
+                )
+                return
+            if len(context.args[0]) > 0 and "," in context.args[0]:
+                with open(self.filename, "a") as out:
+                    out.write(context.args[0] + "\n")
+                await update.message.reply_markdown_v2(
+                    "added " + context.args[0].replace(".", "\\.")
                 )
             else:
                 await update.message.reply_markdown_v2(
-                    "not found " + context.args[0].replace(".", "\\.")
+                    "Usage: /a <fid,name>\\nExample: `/a FLR123456,John Doe`"
                 )
+        except Exception as e:
+            if update and update.message:
+                await update.message.reply_markdown_v2(f"Error: {str(e)}")
+    
+    async def delete(self, update: Update, context: CallbackContext):
+        try:
+            if update.message is None:
+                return
+            # Admin check
+            if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+                await update.message.reply_markdown_v2("Unauthorized")
+                return
+            if context.args is None or len(context.args) != 1:
+                await update.message.reply_markdown_v2(
+                    "Usage: /d <fid>\\nExample: `/d FLR123456`"
+                )
+                return
+            fid = context.args[0]
+            
+            if len(fid) > 0:
+                with open(self.filename, "r") as f:
+                    all_names = f.readlines()
+                
+                with open(self.filename, "w") as f:
+                    deleted = False
+                    for n in all_names:
+                        if fid not in n:
+                            f.write(n)
+                        else:
+                            deleted = True
+            
+                if deleted:
+                    await update.message.reply_markdown_v2(
+                        "deleted " + fid.replace(".", "\\.")
+                    )
+                else:
+                    await update.message.reply_markdown_v2(
+                        "not found " + fid.replace(".", "\\.")
+                    )
+        except Exception as e:
+            if update and update.message:
+                await update.message.reply_markdown_v2(f"Error: {str(e)}")
 
     async def refresh_ddb(self, update: Update, context: CallbackContext):
-        if update.effective_user.id != int(self.admin_id):
-            return
-        if update.message is None:
-            return
-
-        if self.ogn_client is None:
-            await update.message.reply_text("DDB refresh unavailable: no client reference")
-            return
-
         try:
-            count = self.ogn_client.refresh_ddb_devices()
-            await update.message.reply_markdown_v2(
-                rf"DDB refreshed: *{count}* devices loaded"
-            )
+            if update.message is None:
+                return
+            # Admin check
+            if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+                await update.message.reply_markdown_v2("Unauthorized")
+                return
+
+            if self.ogn_client is None:
+                await update.message.reply_markdown_v2("DDB refresh unavailable: no client reference")
+                return
+
+            try:
+                count = self.ogn_client.refresh_ddb_devices()
+                await update.message.reply_markdown_v2(
+                    rf"DDB refreshed: *{count}* devices loaded"
+                )
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.error(f"DDB refresh failed: {e}")
+                await update.message.reply_markdown_v2(
+                    rf"DDB refresh failed\: *{str(e)}*"
+                )
         except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.error(f"DDB refresh failed: {e}")
-            await update.message.reply_markdown_v2(
-                rf"DDB refresh failed\: *{str(e)}*"
-            )
+            if update and update.message:
+                await update.message.reply_markdown_v2(f"Error: {str(e)}")
 
     async def igc_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /igc command. Starts IGC file request conversation."""
-        if update.effective_user.id != int(self.admin_id):
+        if update.message is None:
+            return ConversationHandler.END
+        # Admin check
+        if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+            await update.message.reply_markdown_v2("Unauthorized")
             return ConversationHandler.END
         chat_id = update.message.chat_id if update.message is not None else (update.effective_chat.id if update.effective_chat else None)
         if chat_id is None:
             return ConversationHandler.END
 
         try:
-            if update.message is not None:
-                await update.message.reply_text("Loading aircraft...")
-            else:
-                await context.bot.send_message(chat_id=chat_id, text="Loading aircraft...")
+            await update.message.reply_text("Loading aircraft...")
         except Exception:
-            pass
+            await context.bot.send_message(chat_id=chat_id, text="Loading aircraft...")
 
-        aircraft_data = scan_igc_files()
+        aircraft_data = scan_igc_files() or {}
         if not aircraft_data:
             if update.message is not None:
                 await update.message.reply_text("No IGC files available yet")
             else:
                 await context.bot.send_message(chat_id=chat_id, text="No IGC files available yet")
             return ConversationHandler.END
-
+        
         context.chat_data['aircraft_data'] = aircraft_data
         aircraft_list = sorted(list(aircraft_data.keys()))
         keyboard = _build_aircraft_keyboard(aircraft_list)
@@ -318,15 +388,17 @@ class TelegramBot:
         
         # Daily restart scheduler removed
         
-        self.application = Application.builder().token(self.token).build()
+        self.application = Application.builder().token(self.token).post_init(post_init).build()
         
         add_handler = CommandHandler('a', self.add)
         del_handler = CommandHandler('d', self.delete)
         refresh_handler = CommandHandler('refreshddb', self.refresh_ddb)
+        start_handler = CommandHandler('start', self.start)
         
         self.application.add_handler(add_handler)
         self.application.add_handler(del_handler)
         self.application.add_handler(refresh_handler)
+        self.application.add_handler(start_handler)
         
         # IGC file request conversation
         igc_conv_handler = ConversationHandler(

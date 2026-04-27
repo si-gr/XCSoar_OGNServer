@@ -117,8 +117,13 @@ class OGNClient:
     
     def _write_igc_file(self, beacon: dict):
         address = beacon["address"][2:]
-        if address in self.names_df["fid"].values:
-            nickname = self.names_df[self.names_df["fid"].str.contains(address)].iloc[0]["name"]
+        if address in self.names_df["fid"].values or get_registration(beacon["address"], self.ddb_devices) in self.names_df["fid"].values:
+            nickname = None
+            nickname_address = self.names_df[self.names_df["fid"].str.contains(address)]
+            if len(nickname_address) > 0:
+                nickname = nickname_address.iloc[0]["name"]
+            else:
+                nickname = self.names_df[self.names_df["fid"].str.contains(get_registration(beacon["address"], self.ddb_devices))].iloc[0]["name"]
             dt = datetime.datetime.now()
             lat_d = beacon["latitude"]
             lat_m = (lat_d - int(lat_d)) * 60

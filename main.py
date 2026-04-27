@@ -9,7 +9,12 @@ import json
 from datetime import datetime
 
 from src.ogn_server import Config, OGNClient, create_app, start_server_thread, TelegramBot
+from src.ogn_server.telegram_bot import post_init  # Optional wiring hook for Application post_init
 from src.ogn_server.formatters import JSONFormatter
+
+# Initialize logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def setup_signal_handlers(ogn_client=None,  telegram_bot=None):
