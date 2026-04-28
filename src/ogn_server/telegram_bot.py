@@ -535,6 +535,8 @@ class TelegramBot:
             "   Downloads latest data from glidernet\\\n"
             "/igc \- Download IGC flight files\\\n"
             "   Interactive selection of aircraft and date\\\n"
+            "/loc2igc \- Convert location data to IGC format\\\n"
+            "   Generate full IGC from location\.txt files\\\n"
             "/cancel \- Cancel an ongoing operation\\\n"
         )
         await update.message.reply_markdown_v2(commands_text)
