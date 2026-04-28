@@ -181,3 +181,78 @@ class TestTelegramBot:
                 bot = TelegramBot()
                 import asyncio
                 asyncio.run(bot.start(mock_update, mock_context))
+
+
+class TestLocationHelpers:
+    """Unit tests for scan_location_files() and generate_full_igc() helpers."""
+
+    def test_scan_location_files_empty(self, tmp_path, monkeypatch):
+        """Test scan_location_files when no location files exist."""
+        monkeypatch.chdir(tmp_path)
+        from src.ogn_server.telegram_bot import scan_location_files
+        result = scan_location_files()
+        assert result == {}
+
+    def test_scan_location_files_with_data(self, tmp_path, monkeypatch):
+        """Test scan_location_files parses location files correctly."""
+        monkeypatch.chdir(tmp_path)
+
+        location_file = tmp_path / "location_20260428.txt"
+        location_file.write_text(
+            "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
+            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+            "FLRABCDEF,47.6,13.1,90,1600,120,1.5,1705312300,>\n"
+        )
+
+        names_file = tmp_path / "names.csv"
+        names_file.write_text("fid,name\nFLR123456,Test Pilot\n")
+
+        import src.ogn_server.config as config
+        monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
+
+        from src.ogn_server.telegram_bot import scan_location_files
+        result = scan_location_files()
+
+        assert "Test Pilot" in result
+        assert "FLR123456" in result["Test Pilot"]
+        assert "20260428" in result["Test Pilot"]["FLR123456"]
+
+    def test_generate_full_igc_basic(self, tmp_path, monkeypatch):
+        """Test generate_full_igc produces valid IGC format."""
+        monkeypatch.chdir(tmp_path)
+
+        location_file = tmp_path / "location_20260428.txt"
+        location_file.write_text(
+            "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
+            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+        )
+
+        import pandas as pd
+        names_df = pd.DataFrame({'fid': ['FLR123456'], 'name': ['Test Pilot']})
+
+        ddb_devices = {}
+
+        from src.ogn_server.telegram_bot import generate_full_igc
+        igc_bytes = generate_full_igc('FLR123456', '20260428', names_df, ddb_devices)
+        igc_content = igc_bytes.decode('utf-8')
+
+        assert "IGC_FILE_FORMAT_VERSION=6" in igc_content
+        assert "HFTZNTIMEZONE:Europe/Berlin" in igc_content
+        assert "HFDTE" in igc_content
+        assert "HFPLTPILOTINCHARGE:Test Pilot" in igc_content
+        assert "HFTYPETYPEOFGLIDER:" in igc_content
+        assert "HFREGREGISTRATION:" in igc_content
+        assert "B" in igc_content
+
+    def test_generate_full_igc_file_not_found(self, tmp_path, monkeypatch):
+        """Test generate_full_igc raises FileNotFoundError when location file missing."""
+        import pandas as pd
+        names_df = pd.DataFrame({'fid': ['FLR123456'], 'name': ['Test Pilot']})
+
+        from src.ogn_server.telegram_bot import generate_full_igc
+        import pytest
+
+        # Run in temp directory with no location files
+        monkeypatch.chdir(tmp_path)
+        with pytest.raises(FileNotFoundError):
+            generate_full_igc('FLR123456', '20260428', names_df, {})
