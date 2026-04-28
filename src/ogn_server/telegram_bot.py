@@ -23,6 +23,16 @@ from telegram.ext import (
 
 from .config import Config
 
+def escape_markdown_v2(text: str) -> str:
+    """Escape all Telegram MarkdownV2 reserved characters in text.
+    
+    Reserved characters: _ * [ ] ( ) ~ ` > # + - = | { } . !
+    Order matters - backslash must be escaped first.
+    """
+    chars_to_escape = r'\_*[]()~`>#+-=|{}.!'
+    for char in chars_to_escape:
+        text = text.replace(char, '\\' + char)
+    return text
 
 # IGC File Request Conversation States
 SELECTING_AIRCRAFT = 1
@@ -162,7 +172,7 @@ class TelegramBot:
             "/cancel \\- Cancel an ongoing operation\\n\\n"
             "\\_Commands marked \\(admin\\) require admin privileges\\_"
         )
-        await update.message.reply_markdown_v2(commands_text.replace('.', '\\.'))
+        await update.message.reply_markdown_v2(escape_markdown_v2(commands_text))
     
     async def add(self, update: Update, context: CallbackContext):
         try:
@@ -180,7 +190,7 @@ class TelegramBot:
                 with open(self.filename, "a") as out:
                     out.write(context.args[0] + "\n")
                 await update.message.reply_markdown_v2(
-                    "added " + context.args[0].replace(".", "\\.")
+                    "added " + escape_markdown_v2(context.args[0])
                 )
             else:
                 await update.message.reply_markdown_v2(
@@ -188,7 +198,7 @@ class TelegramBot:
                 )
         except Exception as e:
             if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {str(e).replace('.', '\\.')}")
+                await update.message.reply_markdown_v2(f"Error: {escape_markdown_v2(str(e))}")
     
     async def delete(self, update: Update, context: CallbackContext):
         try:
@@ -219,15 +229,15 @@ class TelegramBot:
             
                 if deleted:
                     await update.message.reply_markdown_v2(
-                        "deleted " + fid.replace(".", "\\.")
+                "deleted " + escape_markdown_v2(fid)
                     )
                 else:
                     await update.message.reply_markdown_v2(
-                        "not found " + fid.replace(".", "\\.")
+                "not found " + escape_markdown_v2(fid)
                     )
         except Exception as e:
             if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {str(e).replace('.', '\\.')}")
+                await update.message.reply_markdown_v2(f"Error: {escape_markdown_v2(str(e))}")
 
     async def refresh_ddb(self, update: Update, context: CallbackContext):
         try:
@@ -245,17 +255,17 @@ class TelegramBot:
             try:
                 count = self.ogn_client.refresh_ddb_devices()
                 await update.message.reply_markdown_v2(
-                    rf"DDB refreshed: *{count}* devices loaded"
+rf"DDB refreshed: *{escape_markdown_v2(str(count))}* devices loaded"
                 )
             except Exception as e:
                 logger = logging.getLogger(__name__)
                 logger.error(f"DDB refresh failed: {e}")
                 await update.message.reply_markdown_v2(
-                    rf"DDB refresh failed\: *{str(e).replace('.', '\\.')}*"
+                    rf"DDB refresh failed: *{escape_markdown_v2(str(e))}*"
                 )
         except Exception as e:
             if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {str(e).replace('.', '\\.')}")
+                await update.message.reply_markdown_v2(f"Error: {escape_markdown_v2(str(e))}")
 
     async def igc_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /igc command. Starts IGC file request conversation."""
