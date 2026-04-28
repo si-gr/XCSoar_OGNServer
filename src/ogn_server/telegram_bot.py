@@ -151,21 +151,21 @@ class TelegramBot:
         if update.message is None:
             return
         commands_text = (
-            "\\*Available Commands:\\*\\n\\n"
-            "/start \\- Show available commands\\n"
-"/a \\<fid,name\\> \\- Add a glider to name mapping\\n"
-            "   Example: `/a FLR123456,John Doe`\\n\\n"
-"/d \\<fid\\> \\- Remove a glider from name mapping\\n"
-            "   Example: `/d FLR123456`\\n\\n"
-            "/refreshddb \\- Refresh the FLARM device database\\n"
-            "   Downloads latest data from glidernet\\n\\n"
-            "/igc \\- Download IGC flight files\\n"
-            "   Interactive selection of aircraft and date\\n\\n"
-            "/cancel \\- Cancel an ongoing operation\\n\\n"
-            "\\_Commands marked \\(admin\\) require admin privileges\\_"
+            "*Available Commands:*\n"
+            "/start \- *Show available* commands\\\n"
+"/a \<fid,name\> \- Add a glider to name mapping\\\n"
+            "   Example: `/a FLR123456,John Doe`\\\n"
+"/d \<fid\> \- Remove a glider from name mapping\\\n"
+            "   Example: `/d FLR123456`\\\n"
+            "/refreshddb \- Refresh the FLARM device database\\\n"
+            "   Downloads latest data from glidernet\\\n"
+            "/igc \- Download IGC flight files\\\n"
+            "   Interactive selection of aircraft and date\\\n"
+            "/cancel \- Cancel an ongoing operation\\\n"
         )
-        await update.message.reply_markdown_v2(escape_markdown(commands_text, version=2))
-    
+        await update.message.reply_markdown_v2(commands_text)
+
+
     async def add(self, update: Update, context: CallbackContext):
         try:
             if update.message is None:
@@ -221,11 +221,11 @@ class TelegramBot:
             
                 if deleted:
                     await update.message.reply_markdown_v2(
-                "deleted " + escape_markdown(fid, version=2)
+                        "deleted " + escape_markdown(fid, version=2)
                     )
                 else:
                     await update.message.reply_markdown_v2(
-                "not found " + escape_markdown(fid, version=2)
+                        "not found " + escape_markdown(fid, version=2)
                     )
         except Exception as e:
             if update and update.message:
@@ -247,14 +247,15 @@ class TelegramBot:
             try:
                 count = self.ogn_client.refresh_ddb_devices()
                 await update.message.reply_markdown_v2(
-rf"DDB refreshed: *{escape_markdown(str(count), version=2)}* devices loaded"
+                    "DDB refreshed: *" + escape_markdown(str(count), version=2) + "* devices loaded"
                 )
             except Exception as e:
                 logger = logging.getLogger(__name__)
                 logger.error(f"DDB refresh failed: {e}")
                 await update.message.reply_markdown_v2(
-                    rf"DDB refresh failed: *{escape_markdown(str(e), version=2)}*"
+                    "DDB refresh failed: *" + escape_markdown(str(e), version=2) + "*"
                 )
+                return
         except Exception as e:
             if update and update.message:
                 await update.message.reply_markdown_v2(f"Error: {escape_markdown(str(e), version=2)}")
