@@ -22,7 +22,7 @@ class Config:
     BEACON_TIMEOUT_SECONDS = 30
     BEACON_ZERO_VELOCITY_TIMEOUT_SECONDS = 60
     CLEANUP_INTERVAL_SECONDS = 30
-    LOCATION_FILTER_DEGREES = 0.01
+    LOCATION_FILTER_DEGREES = 0.2
     
     IGC_RETENTION_DAYS = 30
     
@@ -38,6 +38,7 @@ class Config:
     API_HOST_INDEX = 1
     API_TARGET_LAT_INDEX = 2
     API_TARGET_LON_INDEX = 3
+    API_LOC_FILTER_INDEX = 4
     
     @classmethod
     def load_serverdata(cls, validate: bool = True):

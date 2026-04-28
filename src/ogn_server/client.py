@@ -167,11 +167,12 @@ class OGNClient:
         try:
             target_lat = float(self.serverdata[Config.API_TARGET_LAT_INDEX])
             target_lon = float(self.serverdata[Config.API_TARGET_LON_INDEX])
+            loc_filter = float(self.serverdata[Config.API_LOC_FILTER_INDEX]) if len(self.serverdata) > Config.API_LOC_FILTER_INDEX else Config.LOCATION_FILTER_DEGREES
             return (
-                beacon["latitude"] < target_lat + Config.LOCATION_FILTER_DEGREES and
-                beacon["latitude"] > target_lat - Config.LOCATION_FILTER_DEGREES and
-                beacon["longitude"] < target_lon + Config.LOCATION_FILTER_DEGREES and
-                beacon["longitude"] > target_lon - Config.LOCATION_FILTER_DEGREES
+                beacon["latitude"] < target_lat + loc_filter and
+                beacon["latitude"] > target_lat - loc_filter and
+                beacon["longitude"] < target_lon + loc_filter and
+                beacon["longitude"] > target_lon - loc_filter
             )
         except (ValueError, IndexError):
             return False
