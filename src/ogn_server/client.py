@@ -46,6 +46,7 @@ class OGNClient:
         self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
         # Track the AprsClient instance to allow graceful shutdowns
         self.client = None
+        self._migrate_location_file()
 
     def refresh_ddb_devices(self) -> int:
         """Refresh the FLARM device database. Returns number of devices loaded."""
@@ -63,7 +64,43 @@ class OGNClient:
                     names=["fid", "name"], 
                     header=0
                 )
-                self.names_df_time = current_file_time
+        self.names_df_time = current_file_time
+
+    def _migrate_location_file(self):
+        """Migrate existing location.txt to dated name based on file modification time."""
+        location_path = Path(Config.LOCATION_FILE)
+        if not location_path.exists():
+            return
+        
+        # Skip empty files
+        if location_path.stat().st_size == 0:
+            return
+        
+        mtime = location_path.stat().st_mtime
+        file_date = datetime.datetime.fromtimestamp(mtime)
+        today = datetime.datetime.now()
+        
+        age_days = (today - file_date).days
+        
+        # Delete if older than retention period
+        if age_days >= Config.LOCATION_RETENTION_DAYS:
+            try:
+                location_path.unlink()
+                logger.info(f"Migrated/deleted old location.txt (age: {age_days} days)")
+            except OSError:
+                pass
+            return
+        
+        # Rename to dated format
+        date_str = file_date.strftime("%Y%m%d")
+        rotated_name = f"location_{date_str}.txt"
+        
+        if not Path(rotated_name).exists():
+            try:
+                location_path.rename(rotated_name)
+                logger.info(f"Migrated location.txt to {rotated_name}")
+            except OSError:
+                pass
     
     def _cleanup_old_igc_files(self):
         igc_dir = Path(Config.IGC_FOLDER)
@@ -74,6 +111,24 @@ class OGNClient:
             try:
                 if os.stat(igc_file).st_mtime < cutoff_time:
                     igc_file.unlink()
+            except OSError:
+                pass
+
+    def _cleanup_old_location_files(self):
+        """Delete location files older than LOCATION_RETENTION_DAYS."""
+        location_dir = Path(".")
+        if not location_dir.exists():
+            return
+        cutoff_time = time.time() - (Config.LOCATION_RETENTION_DAYS * 86400)
+
+        for location_file in location_dir.glob("location_*.txt"):
+            # Skip current location.txt
+            if location_file.name == Config.LOCATION_FILE:
+                continue
+            try:
+                if os.stat(location_file).st_mtime < cutoff_time:
+                    location_file.unlink()
+                    logger.info(f"Deleted old location file: {location_file.name}")
             except OSError:
                 pass
     
@@ -248,9 +303,10 @@ class OGNClient:
                     del self._climb_history[address]
                     i -= 1
                 i += 1
-            if time.time() > self.igc_cleanup_timestamp + 3600:
-                self.igc_cleanup_timestamp = time.time()
-                self._cleanup_old_igc_files()
+        if time.time() > self.igc_cleanup_timestamp + 3600:
+            self.igc_cleanup_timestamp = time.time()
+            self._cleanup_old_igc_files()
+            self._cleanup_old_location_files()  # ← ADD THIS LINE
     
     def process_beacon(self, raw_message: str):
         self._cleanup_old_beacons()

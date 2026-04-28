@@ -19,6 +19,7 @@ class TestConfig:
         assert Config.PRIVATE_KEY_FILE == "private.key"
         assert Config.ADMIN_CHAT_ID_FILE == "adminChat.id"
         assert Config.LOCATION_FILE == "location.txt"
+        assert Config.LOCATION_RETENTION_DAYS == 2
         assert Config.BEACON_TIMEOUT_SECONDS == 30
         assert Config.CLEANUP_INTERVAL_SECONDS == 30
         assert Config.LOCATION_FILTER_DEGREES == 0.01

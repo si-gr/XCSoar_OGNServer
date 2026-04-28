@@ -16,6 +16,7 @@ class Config:
     PRIVATE_KEY_FILE = "private.key"
     ADMIN_CHAT_ID_FILE = "adminChat.id"
     LOCATION_FILE = "location.txt"
+    LOCATION_RETENTION_DAYS = 2
     IGC_FOLDER = "igc_files"
     
     # Default beacon timeout in seconds (legacy test expects 30 seconds)
