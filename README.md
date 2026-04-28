@@ -79,8 +79,8 @@ FLR789012,Jane Smith
 The server automatically downloads the FLARM Device Database from [glidernet.org](https://github.com/glidernet/ogn-ddb) on startup. This provides automatic registration lookup for known gliders.
 
 **Name resolution priority:**
-1. **DDB registration** (e.g., "D-1234") - downloaded automatically
-2. **names.csv nickname** (e.g., "John Doe") - user-defined via Telegram bot
+1. **names.csv nickname** (e.g., "John Doe") - user-defined via Telegram bot - HIGHEST PRIORITY
+2. **DDB registration** (e.g., "D-1234") - downloaded automatically
 3. **FLARM ID suffix** (last 4 chars) - fallback if neither available
 
 **Cache behavior:**
@@ -119,6 +119,8 @@ Jane,47.52345,13.02345,90,1600,120,1.5,1705312246,>
 ## Telegram Bot Commands
 
 ### Admin Commands
+
+- `/start` - Show available commands and usage examples
 
 - `/a <fid>,<name>` - Add a new glider name (e.g., `/a FLR123456,John Doe`)
 - `/d <fid>` - Delete a glider name (e.g., `/d FLR123456`)
