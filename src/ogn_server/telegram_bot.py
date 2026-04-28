@@ -326,6 +326,9 @@ def generate_full_igc(
             avg_alt = 0
     # Header lines for IGC
     header_lines: list[str] = []
+    # A-record MUST be first line per IGC specification
+    a_record = f"A{Config.IGC_MANUFACTURER_CODE}{Config.IGC_DEVICE_SERIAL}OGNServer"
+    header_lines.append(a_record)
     header_lines.append("IGC_FILE_FORMAT_VERSION=6")
     header_lines.append("HFTZNTIMEZONE:Europe/Berlin")
     header_lines.append(HFDTE_line)

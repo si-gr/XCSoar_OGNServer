@@ -179,6 +179,7 @@ class OGNClient:
                 nickname = nickname_address.iloc[0]["name"]
             else:
                 nickname = self.names_df[self.names_df["fid"].str.contains(get_registration(beacon["address"], self.ddb_devices))].iloc[0]["name"]
+
             dt = datetime.datetime.now()
             lat_d = beacon["latitude"]
             lat_m = (lat_d - int(lat_d)) * 60
@@ -186,7 +187,7 @@ class OGNClient:
             long_d = beacon["longitude"]
             long_m = (long_d - int(long_d)) * 60
             long_s = (long_m - int(long_m)) * 60
-            
+
             igc_line = (
                 f'B{beacon["reference_timestamp"].hour:02d}'
                 f'{beacon["reference_timestamp"].minute:02d}'
@@ -195,12 +196,32 @@ class OGNClient:
                 f'{int(long_d):03d}{int(long_m):02d}{int(long_s*10):03d}E'
                 f'A00000{int(beacon["altitude"]):05d}\n'
             )
-            
+
             igc_dir = Path(Config.IGC_FOLDER)
             igc_dir.mkdir(exist_ok=True)
+            # Use a date-stamped filename to avoid collisions across days
             igc_filename = igc_dir / f"{dt.year}{dt.month:02d}{dt.day:02d}{nickname}.igc"
-            with open(igc_filename, "a") as igc_file:
-                igc_file.write(igc_line)
+
+            # Determine if we need to write header (new/empty file) or append only B-record
+            file_is_new = not igc_filename.exists() or igc_filename.stat().st_size == 0
+
+            if file_is_new:
+                # Build A-record and minimal H-records, then first B-record
+                a_record = f"A{Config.IGC_MANUFACTURER_CODE}{Config.IGC_DEVICE_SERIAL}OGNServer\n"
+                day = dt.day
+                month = dt.month
+                year2 = dt.year % 100
+                h_records = (
+                    f"IGC_FILE_FORMAT_VERSION=6\n"
+                    f"HFDTE{day:02d}{month:02d}{year2:02d}\n"
+                )
+                with open(igc_filename, "w") as igc_file:
+                    igc_file.write(a_record)
+                    igc_file.write(h_records)
+                    igc_file.write(igc_line)
+            else:
+                with open(igc_filename, "a") as igc_file:
+                    igc_file.write(igc_line)
     
     def _write_location(self, beacon: dict):
         with open(Config.LOCATION_FILE, "a") as loc_file:

@@ -18,6 +18,9 @@ class Config:
     LOCATION_FILE = "location.txt"
     LOCATION_RETENTION_DAYS = 2
     IGC_FOLDER = "igc_files"
+    # IGC A-record configuration (FAI IGC specification)
+    IGC_MANUFACTURER_CODE = "XXX"  # Non-approved device manufacturer code
+    IGC_DEVICE_SERIAL = "001"      # 3-character unique serial number
     
     # Default beacon timeout in seconds (legacy test expects 30 seconds)
     BEACON_TIMEOUT_SECONDS = 30

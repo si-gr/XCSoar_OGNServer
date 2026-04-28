@@ -256,3 +256,42 @@ class TestLocationHelpers:
         monkeypatch.chdir(tmp_path)
         with pytest.raises(FileNotFoundError):
             generate_full_igc('FLR123456', '20260428', names_df, {})
+
+    def test_generate_full_igc_has_a_record(self, tmp_path, monkeypatch):
+        """Test generate_full_igc produces IGC with valid A-record as FIRST line."""
+        import re
+        
+        # Create mock location file (required for generate_full_igc to work)
+        location_file = tmp_path / "location_20260428.txt"
+        location_file.write_text(
+            "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
+            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+        )
+        
+        monkeypatch.chdir(tmp_path)
+        
+        import pandas as pd
+        names_df = pd.DataFrame({'fid': ['FLR123456'], 'name': ['Test Pilot']})
+        ddb_devices = {}
+        
+        from src.ogn_server.telegram_bot import generate_full_igc
+        igc_bytes = generate_full_igc('FLR123456', '20260428', names_df, ddb_devices)
+        igc_content = igc_bytes.decode('utf-8')
+        
+        lines = igc_content.split('\n')
+        
+        # A-record MUST be first line per IGC specification
+        assert len(lines) > 0, "IGC content should not be empty"
+        assert lines[0].startswith('A'), f"A-record must be FIRST line, got: {lines[0]}"
+        
+        # Validate A-record format: A + 3 letters + 3 alphanumeric + optional text
+        # Example: AXXX001OGNServer
+        a_record_pattern = r'^A[A-Z]{3}[A-Z0-9]{3}.*$'
+        assert re.match(a_record_pattern, lines[0]), \
+            f"A-record format invalid: {lines[0]} (expected pattern: {a_record_pattern})"
+        
+        # Verify specific expected value based on Config
+        from src.ogn_server.config import Config
+        expected_a_record = f"A{Config.IGC_MANUFACTURER_CODE}{Config.IGC_DEVICE_SERIAL}OGNServer"
+        assert lines[0] == expected_a_record, \
+            f"A-record mismatch: got '{lines[0]}', expected '{expected_a_record}'"
