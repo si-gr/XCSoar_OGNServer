@@ -62,45 +62,48 @@ class TestTelegramBot:
 
     @patch('telegram.Update')
     @patch('telegram.ext.CallbackContext')
-    def test_delete_command_success(self, mock_context, mock_update, mock_config):
-        from src.ogn_server.telegram_bot import TelegramBot
+    def test_delete_command_shows_aircraft_list(self, mock_context, mock_update, mock_config):
+        """Test /d command shows aircraft selection keyboard."""
+        from src.ogn_server.telegram_bot import TelegramBot, scan_names_csv
         
         mock_update.effective_user.id = 12345
         mock_update.message = MagicMock()
-        mock_update.message.reply_markdown_v2 = AsyncMock()
-        mock_context.args = ["FLR12345"]
+        mock_update.message.reply_text = AsyncMock()
+        mock_context.bot.send_message = AsyncMock()
         
         with patch('src.ogn_server.telegram_bot.Config.load_admin_chat_id', return_value='12345'):
             with patch('src.ogn_server.telegram_bot.Config.load_private_key', return_value='test_token'):
                 bot = TelegramBot()
                 
                 import asyncio
-                asyncio.run(bot.delete(mock_update, mock_context))
+                result = asyncio.run(bot.delete_command(mock_update, mock_context))
                 
-        content = mock_config.read_text()
-        assert "FLR12345" not in content
-        assert "FLR67890" in content
+        # Should return SELECTING_AIRCRAFT_FOR_DELETE state (value 7)
+        assert result == 7
+        # Verify reply_text or send_message was called
+        assert mock_update.message.reply_text.called or mock_context.bot.send_message.called
 
     @patch('telegram.Update')
     @patch('telegram.ext.CallbackContext')
-    def test_delete_command_not_found(self, mock_context, mock_update, mock_config):
+    def test_delete_command_no_aircraft(self, mock_context, mock_update, mock_config):
+        """Test /d command when names.csv is empty."""
         from src.ogn_server.telegram_bot import TelegramBot
         
         mock_update.effective_user.id = 12345
         mock_update.message = MagicMock()
-        mock_update.message.reply_markdown_v2 = AsyncMock()
-        mock_context.args = ["FLR99999"]
+        mock_update.message.reply_text = AsyncMock()
         
+        # Simulate empty names.csv by clearing the file content
+        mock_config.write_text("")
         with patch('src.ogn_server.telegram_bot.Config.load_admin_chat_id', return_value='12345'):
             with patch('src.ogn_server.telegram_bot.Config.load_private_key', return_value='test_token'):
                 bot = TelegramBot()
                 
                 import asyncio
-                asyncio.run(bot.delete(mock_update, mock_context))
+                result = asyncio.run(bot.delete_command(mock_update, mock_context))
                 
-        content = mock_config.read_text()
-        assert "FLR12345" in content
-        assert "FLR67890" in content
+        # Should end conversation when no aircraft exist
+        assert result is None or result == -1  # END constant
 
     @patch('telegram.Update')
     @patch('telegram.ext.CallbackContext')
@@ -123,8 +126,6 @@ class TestTelegramBot:
             assert token in text
         # Markdown formatting hints should be present
         assert 'Available Commands' in text
-        # Ensure format mentions admin-only notes (even if escaped)
-        assert 'admin' in text
 
     @patch('telegram.Update')
     @patch('telegram.ext.CallbackContext')

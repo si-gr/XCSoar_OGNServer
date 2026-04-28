@@ -40,6 +40,10 @@ LOC2IGC_SELECT_AIRCRAFT = 4
 LOC2IGC_SELECT_DATE = 5
 LOC2IGC_GENERATING = 6
 
+# Delete Command Conversation States
+SELECTING_AIRCRAFT_FOR_DELETE = 7
+CONFIRMING_DELETION = 8
+
 
 def format_size(num_bytes: int) -> str:
     """Format a byte count into a human readable size string."""
@@ -90,6 +94,43 @@ def scan_igc_files() -> dict[str, list[str]]:
     for nick, dates in result.items():
         finalized[nick] = sorted(list(dates), reverse=True)
     return finalized
+
+
+def scan_names_csv() -> list[tuple[str, str]]:
+    """
+    Read names.csv and return list of (fid, name) tuples for selection.
+    
+    Returns:
+        List of (fid, name) tuples sorted by name.
+        Example: [("FLR123456", "John Doe"), ("FLR789012", "Jane Smith")]
+        
+    Raises:
+        Returns empty list if file doesn't exist or is empty.
+    """
+    from src.ogn_server.config import Config
+    
+    names_file = Path(Config.NAMES_FILE)
+    if not names_file.exists():
+        return []
+    
+    result: list[tuple[str, str]] = []
+    try:
+        with open(names_file, "r") as f:
+            reader = csv.reader(f)
+            for row in reader:
+                # Skip header row and empty rows
+                if not row or row[0].lower() == "fid":
+                    continue
+                if len(row) >= 2:
+                    fid = row[0].strip()
+                    name = row[1].strip()
+                    if fid and name:
+                        result.append((fid, name))
+    except Exception:
+        return []
+    
+    # Sort by name for display
+    return sorted(result, key=lambda x: x[1])
 
 
 def generate_full_igc(
@@ -497,6 +538,37 @@ def _build_date_keyboard(dates_list: list[str], aircraft: str) -> InlineKeyboard
     ])
     return InlineKeyboardMarkup(rows)
 
+def _build_aircraft_deletion_keyboard(aircraft_list: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    """Build inline keyboard with aircraft buttons (display name) + Cancel button."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    row: list[InlineKeyboardButton] = []
+    for fid, name in aircraft_list:
+        # Display name, callback data contains fid
+        row.append(InlineKeyboardButton(name, callback_data=f"aircraft:{fid}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    # Cancel button in its own final row
+    buttons.append([InlineKeyboardButton("Cancel", callback_data="cancel")])
+    return InlineKeyboardMarkup(buttons)
+
+def _build_delete_confirmation_keyboard(fid: str, name: str) -> InlineKeyboardMarkup:
+    """Build Yes/No confirmation keyboard for aircraft deletion."""
+    rows: list[list[InlineKeyboardButton]] = []
+    # Yes and No row
+    rows.append([
+        InlineKeyboardButton("Yes", callback_data=f"yes:{fid}:{name}"),
+        InlineKeyboardButton("No", callback_data="no"),
+    ])
+    # Back and Cancel row
+    rows.append([
+        InlineKeyboardButton("◀ Back", callback_data="back"),
+        InlineKeyboardButton("Cancel", callback_data="cancel"),
+    ])
+    return InlineKeyboardMarkup(rows)
+
 
 async def post_init(application: Application) -> None:
     """Set up bot commands menu after startup."""
@@ -571,73 +643,39 @@ class TelegramBot:
             if update and update.message:
                 await update.message.reply_markdown_v2(f"Error: {escape_markdown(str(e), version=2)}")
     
-    async def delete(self, update: Update, context: CallbackContext):
+    async def delete_command(self, update: Update, context: CallbackContext) -> int:
+        """Entry point for /d command. Starts aircraft deletion conversation."""
+        if update.message is None:
+            return ConversationHandler.END
+        # Admin check
+        if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+            await update.message.reply_markdown_v2("Unauthorized")
+            return ConversationHandler.END
+        
+        chat_id = update.message.chat_id if update.message is not None else (update.effective_chat.id if update.effective_chat else None)
+        if chat_id is None:
+            return ConversationHandler.END
+
         try:
-            if update.message is None:
-                return
-            # Admin check
-            if update.effective_user is None or update.effective_user.id != int(self.admin_id):
-                await update.message.reply_markdown_v2("Unauthorized")
-                return
-            if context.args is None or len(context.args) != 1:
-                await update.message.reply_markdown_v2(
-"Usage: /d \\<fid\\>\\nExample: `/d FLR123456`"
-                )
-                return
-            fid = context.args[0]
-            
-            if len(fid) > 0:
-                with open(self.filename, "r") as f:
-                    all_names = f.readlines()
-                
-                with open(self.filename, "w") as f:
-                    deleted = False
-                    for n in all_names:
-                        if fid not in n:
-                            f.write(n)
-                        else:
-                            deleted = True
-            
-                if deleted:
-                    await update.message.reply_markdown_v2(
-                        "deleted " + escape_markdown(fid, version=2)
-                    )
-                else:
-                    await update.message.reply_markdown_v2(
-                        "not found " + escape_markdown(fid, version=2)
-                    )
-        except Exception as e:
-            if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {escape_markdown(str(e), version=2)}")
+            await update.message.reply_text("Loading registered aircraft...")
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text="Loading registered aircraft...")
 
-    async def refresh_ddb(self, update: Update, context: CallbackContext):
-        try:
-            if update.message is None:
-                return
-            # Admin check
-            if update.effective_user is None or update.effective_user.id != int(self.admin_id):
-                await update.message.reply_markdown_v2("Unauthorized")
-                return
-
-            if self.ogn_client is None:
-                await update.message.reply_markdown_v2("DDB refresh unavailable: no client reference")
-                return
-
-            try:
-                count = self.ogn_client.refresh_ddb_devices()
-                await update.message.reply_markdown_v2(
-                    "DDB refreshed: *" + escape_markdown(str(count), version=2) + "* devices loaded"
-                )
-            except Exception as e:
-                logger = logging.getLogger(__name__)
-                logger.error(f"DDB refresh failed: {e}")
-                await update.message.reply_markdown_v2(
-                    "DDB refresh failed: *" + escape_markdown(str(e), version=2) + "*"
-                )
-                return
-        except Exception as e:
-            if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {escape_markdown(str(e), version=2)}")
+        aircraft_list = scan_names_csv()
+        if not aircraft_list:
+            if update.message is not None:
+                await update.message.reply_text("No registered aircraft in names.csv")
+            else:
+                await context.bot.send_message(chat_id=chat_id, text="No registered aircraft in names.csv")
+            return ConversationHandler.END
+        
+        context.chat_data['aircraft_list'] = aircraft_list
+        keyboard = _build_aircraft_deletion_keyboard(aircraft_list)
+        if update.message is not None:
+            await update.message.reply_text("Select aircraft to delete:", reply_markup=keyboard)
+        else:
+            await context.bot.send_message(chat_id=chat_id, text="Select aircraft to delete:", reply_markup=keyboard)
+        return SELECTING_AIRCRAFT_FOR_DELETE
 
     async def igc_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /igc command. Starts IGC file request conversation."""
@@ -739,6 +777,81 @@ class TelegramBot:
                     await context.bot.send_document(chat_id=chat_id, document=fh, filename=fpath.name)
             except Exception as e:
                 logging.getLogger(__name__).warning(f"Failed to send IGC file {fpath}: {e}")
+        return ConversationHandler.END
+
+    async def aircraft_for_deletion_selected(self, update: Update, context: CallbackContext) -> int:
+        """Handles aircraft selection from inline keyboard for deletion."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data or ""
+        if data == "cancel":
+            await query.edit_message_text("Cancelled")
+            context.chat_data.clear()
+            return ConversationHandler.END
+        if data == "back":
+            return await self.delete_command(update, context)
+        if not data.startswith("aircraft:"):
+            return SELECTING_AIRCRAFT_FOR_DELETE
+
+        fid = data[len("aircraft:") :]
+        # Find name from fid
+        aircraft_list = context.chat_data.get('aircraft_list', [])
+        name = next((n for f, n in aircraft_list if f == fid), "Unknown")
+        
+        context.chat_data['selected_fid'] = fid
+        context.chat_data['selected_name'] = name
+        
+        keyboard = _build_delete_confirmation_keyboard(fid, name)
+        await query.edit_message_text(f"Delete {name} ({fid})?", reply_markup=keyboard)
+        return CONFIRMING_DELETION
+
+    async def deletion_confirmed(self, update: Update, context: CallbackContext) -> int:
+        """Handles Yes/No confirmation for aircraft deletion."""
+        query = update.callback_query
+        await query.answer()
+        data = query.data or ""
+        if data == "cancel":
+            await query.edit_message_text("Cancelled")
+            context.chat_data.clear()
+            return ConversationHandler.END
+        if data == "back":
+            aircraft_list = context.chat_data.get('aircraft_list', [])
+            keyboard = _build_aircraft_deletion_keyboard(aircraft_list)
+            await query.edit_message_text("Select aircraft to delete:", reply_markup=keyboard)
+            return SELECTING_AIRCRAFT_FOR_DELETE
+        if data == "no":
+            await query.edit_message_text("Deletion cancelled")
+            context.chat_data.clear()
+            return ConversationHandler.END
+        if not data.startswith("yes:"):
+            return CONFIRMING_DELETION
+        
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            return CONFIRMING_DELETION
+        _, fid, name = parts
+        
+        # Perform actual deletion from names.csv
+        try:
+            with open(self.filename, "r") as f:
+                all_names = f.readlines()
+        
+            with open(self.filename, "w") as f:
+                deleted = False
+                for n in all_names:
+                    if fid not in n:
+                        f.write(n)
+                    else:
+                        deleted = True
+        
+            if deleted:
+                await query.edit_message_text(f"Deleted {name} ({fid})")
+            else:
+                await query.edit_message_text(f"Aircraft {name} ({fid}) not found")
+        except Exception as e:
+            await query.edit_message_text(f"Error: {str(e)}")
+        
+        context.chat_data.clear()
         return ConversationHandler.END
 
     async def cancel_igc(self, update: Update, context: CallbackContext) -> int:
@@ -937,12 +1050,25 @@ class TelegramBot:
         self.application = Application.builder().token(self.token).post_init(post_init).build()
         
         add_handler = CommandHandler('a', self.add)
-        del_handler = CommandHandler('d', self.delete)
+        # Replace simple /d handler with a ConversationHandler for deletion flow
+        del_conv_handler = ConversationHandler(
+            entry_points=[CommandHandler('d', self.delete_command)],
+            states={
+                SELECTING_AIRCRAFT_FOR_DELETE: [CallbackQueryHandler(self.aircraft_for_deletion_selected, pattern=r"^aircraft:.*")],
+                CONFIRMING_DELETION: [CallbackQueryHandler(self.deletion_confirmed, pattern=r"^(yes|no|back|cancel).*")],
+            },
+            fallbacks=[
+                CommandHandler('cancel', self.cancel_igc),
+                CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
+            ],
+            per_user=True,
+            conversation_timeout=CONVERSATION_TIMEOUT,
+        )
         refresh_handler = CommandHandler('refreshddb', self.refresh_ddb)
         start_handler = CommandHandler('start', self.start)
         
         self.application.add_handler(add_handler)
-        self.application.add_handler(del_handler)
+        self.application.add_handler(del_conv_handler)
         self.application.add_handler(refresh_handler)
         self.application.add_handler(start_handler)
         
@@ -962,6 +1088,8 @@ class TelegramBot:
         )
 
         self.application.add_handler(igc_conv_handler)
+
+        
 
         # Location to IGC conversion conversation
         loc2igc_conv_handler = ConversationHandler(
