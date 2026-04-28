@@ -156,13 +156,13 @@ class TelegramBot:
 "/d \\<fid\\> \\- Remove a glider from name mapping\\n"
             "   Example: `/d FLR123456`\\n\\n"
             "/refreshddb \\- Refresh the FLARM device database\\n"
-            "   Downloads latest data from glidernet.org\\n\\n"
+            "   Downloads latest data from glidernet\\n\\n"
             "/igc \\- Download IGC flight files\\n"
             "   Interactive selection of aircraft and date\\n\\n"
             "/cancel \\- Cancel an ongoing operation\\n\\n"
             "\\_Commands marked \\(admin\\) require admin privileges\\_"
         )
-        await update.message.reply_markdown_v2(commands_text)
+        await update.message.reply_markdown_v2(commands_text.replace('.', '\\.'))
     
     async def add(self, update: Update, context: CallbackContext):
         try:
