@@ -188,7 +188,7 @@ class TelegramBot:
                 )
         except Exception as e:
             if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {str(e)}")
+                await update.message.reply_markdown_v2(f"Error: {str(e).replace('.', '\\.')}")
     
     async def delete(self, update: Update, context: CallbackContext):
         try:
@@ -227,7 +227,7 @@ class TelegramBot:
                     )
         except Exception as e:
             if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {str(e)}")
+                await update.message.reply_markdown_v2(f"Error: {str(e).replace('.', '\\.')}")
 
     async def refresh_ddb(self, update: Update, context: CallbackContext):
         try:
@@ -251,11 +251,11 @@ class TelegramBot:
                 logger = logging.getLogger(__name__)
                 logger.error(f"DDB refresh failed: {e}")
                 await update.message.reply_markdown_v2(
-                    rf"DDB refresh failed\: *{str(e)}*"
+                    rf"DDB refresh failed\: *{str(e).replace('.', '\\.')}*"
                 )
         except Exception as e:
             if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {str(e)}")
+                await update.message.reply_markdown_v2(f"Error: {str(e).replace('.', '\\.')}")
 
     async def igc_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /igc command. Starts IGC file request conversation."""
