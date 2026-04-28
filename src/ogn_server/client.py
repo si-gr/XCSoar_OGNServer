@@ -169,7 +169,7 @@ class OGNClient:
             target_lon = float(self.serverdata[Config.API_TARGET_LON_INDEX])
             return (
                 beacon["latitude"] < target_lat + Config.LOCATION_FILTER_DEGREES and
-                beacon["latitude"] > target_lat - 0.03 and
+                beacon["latitude"] > target_lat - Config.LOCATION_FILTER_DEGREES and
                 beacon["longitude"] < target_lon + Config.LOCATION_FILTER_DEGREES and
                 beacon["longitude"] > target_lon - Config.LOCATION_FILTER_DEGREES
             )
