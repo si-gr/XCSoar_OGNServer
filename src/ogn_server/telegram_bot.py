@@ -677,6 +677,23 @@ class TelegramBot:
             await context.bot.send_message(chat_id=chat_id, text="Select aircraft to delete:", reply_markup=keyboard)
         return SELECTING_AIRCRAFT_FOR_DELETE
 
+    async def refresh_ddb(self, update: Update, context: CallbackContext) -> None:
+        if update.message is None:
+            return
+        if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+            await update.message.reply_markdown_v2("Unauthorized")
+            return
+        
+        try:
+            await update.message.reply_text("Refreshing FLARM device database...")
+            if self.ogn_client:
+                count = self.ogn_client.refresh_ddb_devices()
+                await update.message.reply_text(f"Successfully refreshed {count} devices from DDB.")
+            else:
+                await update.message.reply_text("OGN client not available for DDB refresh.")
+        except Exception as e:
+            await update.message.reply_markdown_v2(f"Error refreshing DDB: {escape_markdown(str(e), version=2)}")
+
     async def igc_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /igc command. Starts IGC file request conversation."""
         if update.message is None:
