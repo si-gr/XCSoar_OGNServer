@@ -44,8 +44,8 @@ class OGNClient:
         self._error_count = 0
         self._last_error_time = 0
         self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
-        # Track the AprsClient instance to allow graceful shutdowns
         self.client = None
+        self._last_rotation_check_time = 0
         self._migrate_location_file()
 
     def refresh_ddb_devices(self) -> int:
@@ -131,6 +131,95 @@ class OGNClient:
                     logger.info(f"Deleted old location file: {location_file.name}")
             except OSError:
                 pass
+    
+    def _get_entry_dates(self, entries: list[str]) -> tuple[list[str], dict[datetime.date, list[str]]]:
+        today_entries = []
+        historical_entries: dict[datetime.date, list[str]] = {}
+        today = datetime.date.today()
+        
+        for entry in entries:
+            entry = entry.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            
+            parts = entry.split(",")
+            if len(parts) < 8:
+                continue
+            
+            try:
+                timestamp = int(parts[7])
+                entry_date = datetime.date.fromtimestamp(timestamp)
+                
+                if entry_date == today:
+                    today_entries.append(entry)
+                else:
+                    if entry_date not in historical_entries:
+                        historical_entries[entry_date] = []
+                    historical_entries[entry_date].append(entry)
+            except (ValueError, IndexError):
+                continue
+        
+        return today_entries, historical_entries
+    
+    def _rotate_location_file_if_needed(self):
+        if time.time() <= self._last_rotation_check_time + Config.LOCATION_ROTATION_CHECK_INTERVAL_SECONDS:
+            return
+        
+        self._last_rotation_check_time = time.time()
+        
+        location_path = Path(Config.LOCATION_FILE)
+        if not location_path.exists() or location_path.stat().st_size == 0:
+            return
+        
+        try:
+            content = location_path.read_text()
+            entries = [line.strip() for line in content.splitlines() if line.strip() and not line.startswith("#")]
+            
+            if not entries:
+                return
+            
+            timestamps = []
+            for entry in entries:
+                parts = entry.split(",")
+                if len(parts) >= 8:
+                    try:
+                        timestamps.append(int(parts[7]))
+                    except ValueError:
+                        pass
+            
+            if not timestamps:
+                return
+            
+            oldest_ts = min(timestamps)
+            oldest_date = datetime.date.fromtimestamp(oldest_ts)
+            today = datetime.date.today()
+            
+            if oldest_date >= today:
+                return
+            
+            today_entries, historical_entries = self._get_entry_dates(entries)
+            
+            for entry_date, date_entries in historical_entries.items():
+                dated_name = f"location_{entry_date.strftime('%Y%m%d')}.txt"
+                dated_path = Path(dated_name)
+                
+                mode = "a" if dated_path.exists() else "w"
+                with open(dated_path, mode) as f:
+                    if not dated_path.exists() or dated_path.stat().st_size == 0:
+                        f.write("# Location Log File (auto-generated)\n")
+                        f.write("# Format: address,latitude,longitude,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n\n")
+                    for entry in date_entries:
+                        f.write(entry + "\n")
+            
+            location_path.write_text("")
+            for entry in today_entries:
+                with open(location_path, "a") as f:
+                    f.write(entry + "\n")
+            
+            logger.info(f"Rotated location.txt: {len(historical_entries)} days archived, {len(today_entries)} today's entries")
+        
+        except Exception as e:
+            logger.warning(f"Failed to rotate location file: {e}")
     
     def _get_nickname(self, flarm_id: str) -> Optional[str]:
         """
@@ -224,6 +313,7 @@ class OGNClient:
                     igc_file.write(igc_line)
     
     def _write_location(self, beacon: dict):
+        self._rotate_location_file_if_needed()
         with open(Config.LOCATION_FILE, "a") as loc_file:
             loc_file.write(
                 f'{beacon["address"]},'

@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import datetime
 from pathlib import Path
 import pytest
 
@@ -269,3 +270,183 @@ class TestLocationIntegration:
         # New file should exist
         assert Path("location.txt").exists()
         assert Path("location.txt").stat().st_size > 0
+
+
+class TestDateRotation:
+    """Test _rotate_location_file_if_needed() method - oldest entry based rotation."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.test_serverdata = ["token", "host", "47.5", "13.0"]
+        self._cleanup_test_files()
+    
+    def teardown_method(self):
+        """Clean up after each test."""
+        self._cleanup_test_files()
+    
+    def _cleanup_test_files(self):
+        """Remove all location files created during tests."""
+        for f in Path(".").glob("location_*.txt"):
+            f.unlink(missing_ok=True)
+        if Path("location.txt").exists():
+            Path("location.txt").unlink(missing_ok=True)
+    
+    def test_rotate_skips_when_no_file_exists(self):
+        """Should do nothing when location.txt doesn't exist."""
+        client = OGNClient(self.test_serverdata)
+        client._rotate_location_file_if_needed()
+        
+        assert not Path("location.txt").exists()
+        dated_files = list(Path(".").glob("location_*.txt"))
+        assert len(dated_files) == 0
+    
+    def test_rotate_skips_empty_file(self):
+        """Empty location.txt should not be rotated."""
+        Path("location.txt").touch()
+        
+        client = OGNClient(self.test_serverdata)
+        client._rotate_location_file_if_needed()
+        
+        assert Path("location.txt").exists()
+        assert Path("location.txt").stat().st_size == 0
+    
+    def test_rotate_skips_only_today_entries(self):
+        """Should not rotate if all entries are from today."""
+        client = OGNClient(self.test_serverdata)
+        
+        today_ts = int(time.time())
+        content = f"FLR123456,47.5,13.0,180,1500,100,2.5,{today_ts},^\n"
+        Path("location.txt").write_text(content)
+        
+        client._rotate_location_file_if_needed()
+        
+        assert Path("location.txt").exists()
+        assert Path("location.txt").read_text().strip() == content.strip()
+    
+    def test_rotate_with_yesterday_entries(self):
+        """Should rotate when oldest entry is from yesterday."""
+        client = OGNClient(self.test_serverdata)
+        
+        yesterday_ts = int(time.time()) - 86400
+        content = f"FLR123456,47.5,13.0,180,1500,100,2.5,{yesterday_ts},^\n"
+        Path("location.txt").write_text(content)
+        
+        client._rotate_location_file_if_needed()
+        
+        dated_files = list(Path(".").glob("location_*.txt"))
+        assert len(dated_files) >= 1
+    
+    def test_rotate_filters_by_date_content(self):
+        """Entries should be filtered by timestamp date."""
+        client = OGNClient(self.test_serverdata)
+        
+        today_ts = int(time.time())
+        yesterday_ts = int(time.time()) - 86400
+        
+        content = (
+            f"FLR111111,47.5,13.0,180,1500,100,2.5,{today_ts},^\n"
+            f"FLR222222,47.6,13.1,90,1600,120,1.5,{yesterday_ts},>\n"
+        )
+        Path("location.txt").write_text(content)
+        
+        client._rotate_location_file_if_needed()
+        
+        assert Path("location.txt").exists()
+        loc_content = Path("location.txt").read_text()
+        assert "FLR111111" in loc_content
+        assert "FLR222222" not in loc_content
+    
+    def test_rotate_handles_collision_by_appending(self):
+        """If dated archive exists, should append rather than overwrite."""
+        client = OGNClient(self.test_serverdata)
+        
+        yesterday_ts = int(time.time()) - 86400
+        yesterday_date = datetime.date.fromtimestamp(yesterday_ts).strftime("%Y%m%d")
+        rotated_name = f"location_{yesterday_date}.txt"
+        
+        Path(rotated_name).write_text("existing,data\n")
+        Path("location.txt").write_text(f"FLR123,47.5,13.0,180,1500,100,2.5,{yesterday_ts},^\n")
+        
+        client._rotate_location_file_if_needed()
+        
+        assert Path(rotated_name).exists()
+        content = Path(rotated_name).read_text()
+        assert "existing,data" in content
+        assert "FLR123" in content
+
+
+class TestDateRotationIntegration:
+    """Integration tests for date-based rotation with full workflow."""
+
+    def setup_method(self):
+        """Set up test fixtures."""
+        self.test_serverdata = ["token", "host", "47.5", "13.0"]
+        self._cleanup_test_files()
+    
+    def teardown_method(self):
+        """Clean up after each test."""
+        self._cleanup_test_files()
+    
+    def _cleanup_test_files(self):
+        """Remove all location files created during tests."""
+        for f in Path(".").glob("location_*.txt"):
+            f.unlink(missing_ok=True)
+        if Path("location.txt").exists():
+            Path("location.txt").unlink(missing_ok=True)
+    
+    def test_write_triggers_rotation_on_old_entries(self):
+        """Writing beacon should trigger rotation if existing entries are old."""
+        yesterday_ts = int(time.time()) - 86400
+        content = f"FLR123456,47.5,13.0,180,1500,100,2.5,{yesterday_ts},^\n"
+        Path("location.txt").write_text(content)
+        
+        client = OGNClient(self.test_serverdata)
+        
+        today_ts = int(time.time())
+        test_beacon = {
+            "address": "FLR789012",
+            "latitude": 47.6,
+            "longitude": 13.1,
+            "track": 90,
+            "altitude": 1600,
+            "ground_speed": 120,
+            "climb_rate": 1.5,
+            "reference_timestamp": today_ts,
+            "symbolcode": ">"
+        }
+        client._write_location(test_beacon)
+        
+        dated_files = list(Path(".").glob("location_*.txt"))
+        assert len(dated_files) >= 1
+        
+        assert Path("location.txt").exists()
+        loc_content = Path("location.txt").read_text()
+        assert "FLR789012" in loc_content
+    
+    def test_rotation_check_interval_respected(self):
+        """Rotation check should only happen every 15 minutes."""
+        from src.ogn_server.config import Config
+        
+        client = OGNClient(self.test_serverdata)
+        
+        yesterday_ts = int(time.time()) - 86400
+        content = f"FLR123456,47.5,13.0,180,1500,100,2.5,{yesterday_ts},^\n"
+        Path("location.txt").write_text(content)
+        
+        initial_check_time = client._last_rotation_check_time
+        
+        client._rotate_location_file_if_needed()
+        first_check_time = client._last_rotation_check_time
+        
+        assert first_check_time > initial_check_time
+        
+        client._rotate_location_file_if_needed()
+        second_check_time = client._last_rotation_check_time
+        
+        assert second_check_time == first_check_time
+        
+        client._last_rotation_check_time = time.time() - (Config.LOCATION_ROTATION_CHECK_INTERVAL_SECONDS + 10)
+        client._rotate_location_file_if_needed()
+        third_check_time = client._last_rotation_check_time
+        
+        assert third_check_time > second_check_time
