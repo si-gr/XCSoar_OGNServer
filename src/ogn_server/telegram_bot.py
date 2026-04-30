@@ -1,7 +1,7 @@
 import logging
 import os
 import signal
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import csv
 from zoneinfo import ZoneInfo
@@ -460,17 +460,26 @@ def scan_location_files() -> dict[str, dict[str, list[str]]]:
     if not location_dir.exists():
         return {}
 
+    # Calculate valid dates: today and yesterday (Europe/Berlin timezone)
+    berlin_tz = ZoneInfo("Europe/Berlin")
+    today_berlin = datetime.now(berlin_tz).strftime("%Y%m%d")
+    yesterday_berlin = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
+    valid_dates = {today_berlin, yesterday_berlin}
+
     for loc_file in location_dir.glob("location*.txt"):
         fname = loc_file.name
         date_str = None
         if fname == Config.LOCATION_FILE:
-            date_str = datetime.now().strftime("%Y%m%d")
+            date_str = datetime.now(berlin_tz).strftime("%Y%m%d")
         else:
             if fname.startswith("location_") and fname.endswith(".txt"):
                 base = fname[len("location_"):-len(".txt")]
                 if len(base) == 8 and base.isdigit():
                     date_str = base
         if not date_str:
+            continue
+        # Filter: only include today and yesterday (Europe/Berlin)
+        if date_str not in valid_dates:
             continue
 
         try:
@@ -574,13 +583,13 @@ async def post_init(application: Application) -> None:
     """Set up bot commands menu after startup."""
     bot = application.bot
     private_commands = [
-        BotCommand("start", "Show available commands"),
-        BotCommand("a", "Add a glider to name mapping"),
-        BotCommand("d", "Remove a glider from name mapping"),
-        BotCommand("refreshddb", "Refresh the FLARM device database"),
-        BotCommand("igc", "Download IGC flight files"),
-        BotCommand("loc2igc", "Convert location data to IGC format"),
-        BotCommand("cancel", "Cancel an ongoing operation"),
+        BotCommand("start", "Show help message"),
+        BotCommand("a", "Add glider nickname"),
+        BotCommand("d", "Delete glider nickname"),
+        BotCommand("refreshddb", "Refresh DDB"),
+        BotCommand("igc", "Request IGC files"),
+        BotCommand("loc2igc", "Convert location to IGC"),
+        BotCommand("cancel", "Cancel operation"),
     ]
     group_commands = private_commands.copy()
     group_commands.append(BotCommand("loc2igc", "Convert location data to IGC format"))
@@ -601,18 +610,18 @@ class TelegramBot:
             return
         commands_text = (
             "*Available Commands:*\n"
-            "/start \- *Show available* commands\\\n"
-"/a \<fid,name\> \- Add a glider to name mapping\\\n"
+            "/start \- Show this help message\\\n"
+            "/a \<fid,name\> \- Add a glider nickname\\\n"
             "   Example: `/a FLR123456,John Doe`\\\n"
-"/d \<fid\> \- Remove a glider from name mapping\\\n"
-            "   Example: `/d FLR123456`\\\n"
-            "/refreshddb \- Refresh the FLARM device database\\\n"
+            "/d \- Delete a glider nickname (interactive)\\\n"
+            "   Shows list of aircraft, select to delete\\\n"
+            "/refreshddb \- Refresh FLARM device database\\\n"
             "   Downloads latest data from glidernet\\\n"
-            "/igc \- Download IGC flight files\\\n"
-            "   Interactive selection of aircraft and date\\\n"
-            "/loc2igc \- Convert location data to IGC format\\\n"
-            "   Generate full IGC from location\.txt files\\\n"
-            "/cancel \- Cancel an ongoing operation\\\n"
+            "/igc \- Request IGC flight files\\\n"
+            "   Interactive aircraft and date selection\\\n"
+            "/loc2igc \- Convert location\.txt to IGC\\\n"
+            "   Generate IGC from recorded locations\\\n"
+            "/cancel \- Cancel current operation\\\n"
         )
         await update.message.reply_markdown_v2(commands_text)
 

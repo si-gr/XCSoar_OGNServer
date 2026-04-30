@@ -196,9 +196,16 @@ class TestLocationHelpers:
 
     def test_scan_location_files_with_data(self, tmp_path, monkeypatch):
         """Test scan_location_files parses location files correctly."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        
         monkeypatch.chdir(tmp_path)
 
-        location_file = tmp_path / "location_20260428.txt"
+        # Use yesterday's date to ensure it passes the 2-day filter
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        yesterday = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
+        
+        location_file = tmp_path / f"location_{yesterday}.txt"
         location_file.write_text(
             "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
             "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
@@ -206,7 +213,7 @@ class TestLocationHelpers:
         )
 
         names_file = tmp_path / "names.csv"
-        names_file.write_text("fid,name\nFLR123456,Test Pilot\n")
+        names_file.write_text("fid,name\nFLR123456,Test Pilot\nFLRABCDEF,Another Pilot\n")
 
         import src.ogn_server.config as config
         monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
@@ -216,7 +223,7 @@ class TestLocationHelpers:
 
         assert "Test Pilot" in result
         assert "FLR123456" in result["Test Pilot"]
-        assert "20260428" in result["Test Pilot"]["FLR123456"]
+        assert yesterday in result["Test Pilot"]["FLR123456"]
 
     def test_generate_full_igc_basic(self, tmp_path, monkeypatch):
         """Test generate_full_igc produces valid IGC format."""
@@ -296,3 +303,150 @@ class TestLocationHelpers:
         expected_a_record = f"A{Config.IGC_MANUFACTURER_CODE}{Config.IGC_DEVICE_SERIAL}OGNServer"
         assert lines[0] == expected_a_record, \
             f"A-record mismatch: got '{lines[0]}', expected '{expected_a_record}'"
+
+
+class TestLocationFilesTwoDayFilter:
+    """Unit tests for scan_location_files() 2-day filtering logic."""
+
+    def test_scan_location_files_filters_to_last_2_days(self, tmp_path, monkeypatch):
+        """Test that only today and yesterday dates are returned (Europe/Berlin)."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        
+        monkeypatch.chdir(tmp_path)
+        
+        # Calculate dates in Europe/Berlin timezone
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        today = datetime.now(berlin_tz).strftime("%Y%m%d")
+        yesterday = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
+        two_days_ago = (datetime.now(berlin_tz) - timedelta(days=2)).strftime("%Y%m%d")
+        
+        # Create location files for today, yesterday, and 2 days ago
+        (tmp_path / f"location_{today}.txt").write_text(
+            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+        )
+        (tmp_path / f"location_{yesterday}.txt").write_text(
+            "FLR789012,47.6,13.1,90,1600,120,1.5,1705312300,>\n"
+        )
+        (tmp_path / f"location_{two_days_ago}.txt").write_text(
+            "FLRABCDEF,47.7,13.2,270,1400,90,1.0,1705312400,<\n"
+        )
+        
+        names_file = tmp_path / "names.csv"
+        names_file.write_text("fid,name\nFLR123456,Pilot Today\nFLR789012,Pilot Yesterday\nFLRABCDEF,Pilot Old\n")
+        
+        import src.ogn_server.config as config
+        monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
+        
+        from src.ogn_server.telegram_bot import scan_location_files
+        result = scan_location_files()
+        
+        # Should have data for today and yesterday
+        all_dates = set()
+        for nick_data in result.values():
+            for flarm_dates in nick_data.values():
+                all_dates.update(flarm_dates)
+        
+        assert today in all_dates, f"Today ({today}) should be included"
+        assert yesterday in all_dates, f"Yesterday ({yesterday}) should be included"
+        assert two_days_ago not in all_dates, f"Two days ago ({two_days_ago}) should be filtered out"
+
+    def test_scan_location_files_only_old_files(self, tmp_path, monkeypatch):
+        """Test that when only old files exist, empty dict is returned."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        
+        monkeypatch.chdir(tmp_path)
+        
+        # Create file from 5 days ago (should be filtered out)
+        five_days_ago = (datetime.now(ZoneInfo("Europe/Berlin")) - timedelta(days=5)).strftime("%Y%m%d")
+        (tmp_path / f"location_{five_days_ago}.txt").write_text(
+            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+        )
+        
+        names_file = tmp_path / "names.csv"
+        names_file.write_text("fid,name\nFLR123456,Old Pilot\n")
+        
+        import src.ogn_server.config as config
+        monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
+        
+        from src.ogn_server.telegram_bot import scan_location_files
+        result = scan_location_files()
+        
+        # Should return empty since all files are too old
+        assert result == {}
+
+    def test_scan_location_files_mixed_dates(self, tmp_path, monkeypatch):
+        """Test filtering with multiple dates including today/yesterday."""
+        from datetime import datetime, timedelta
+        from zoneinfo import ZoneInfo
+        
+        monkeypatch.chdir(tmp_path)
+        
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        today = datetime.now(berlin_tz).strftime("%Y%m%d")
+        yesterday = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
+        three_days_ago = (datetime.now(berlin_tz) - timedelta(days=3)).strftime("%Y%m%d")
+        one_week_ago = (datetime.now(berlin_tz) - timedelta(days=7)).strftime("%Y%m%d")
+        
+        # Create files for various dates
+        (tmp_path / f"location_{today}.txt").write_text("FLR111,47.5,13.0,180,1500,100,2.5,1705312245,^\n")
+        (tmp_path / f"location_{yesterday}.txt").write_text("FLR222,47.6,13.1,90,1600,120,1.5,1705312300,>\n")
+        (tmp_path / f"location_{three_days_ago}.txt").write_text("FLR333,47.7,13.2,270,1400,90,1.0,1705312400,<\n")
+        (tmp_path / f"location_{one_week_ago}.txt").write_text("FLR444,47.8,13.3,45,1300,80,0.5,1705312500,v\n")
+        
+        names_file = tmp_path / "names.csv"
+        names_file.write_text("fid,name\nFLR111,Today\nFLR222,Yesterday\nFLR333,Three Days\nFLR444,Week Ago\n")
+        
+        import src.ogn_server.config as config
+        monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
+        
+        from src.ogn_server.telegram_bot import scan_location_files
+        result = scan_location_files()
+        
+        # Collect all dates
+        all_dates = set()
+        for nick_data in result.values():
+            for flarm_dates in nick_data.values():
+                all_dates.update(flarm_dates)
+        
+        # Only today and yesterday should be present
+        assert len(all_dates) <= 2, "Should have at most 2 dates"
+        assert today in all_dates or yesterday in all_dates, "Should have at least today or yesterday"
+        assert three_days_ago not in all_dates, "Three days ago should be filtered"
+        assert one_week_ago not in all_dates, "One week ago should be filtered"
+
+    def test_scan_location_files_current_file_treated_as_today(self, tmp_path, monkeypatch):
+        """Test that location.txt (current) is treated as today's date."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        
+        monkeypatch.chdir(tmp_path)
+        
+        today = datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y%m%d")
+        
+        # Create current location.txt file
+        (tmp_path / "location.txt").write_text(
+            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+        )
+        
+        names_file = tmp_path / "names.csv"
+        names_file.write_text("fid,name\nFLR123456,Current Pilot\n")
+        
+        import src.ogn_server.config as config
+        monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
+        monkeypatch.setattr(config.Config, 'LOCATION_FILE', "location.txt")
+        
+        from src.ogn_server.telegram_bot import scan_location_files
+        result = scan_location_files()
+        
+        # Should have today's date from location.txt
+        assert len(result) > 0, "Should find current location.txt"
+        found_today = False
+        for nick_data in result.values():
+            for flarm_dates in nick_data.values():
+                if today in flarm_dates:
+                    found_today = True
+                    break
+        
+        assert found_today, "location.txt should be mapped to today's date"
