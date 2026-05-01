@@ -308,8 +308,8 @@ class TestLocationHelpers:
 class TestLocationFilesDateFilter:
     """Unit tests for scan_location_files() today-only filtering logic."""
 
-    def test_scan_location_files_filters_to_today_only(self, tmp_path, monkeypatch):
-        """Test that only today's date is returned (Europe/Berlin)."""
+    def test_scan_location_files_includes_retention_period(self, tmp_path, monkeypatch):
+        """Test that LOCATION_RETENTION_DAYS dates are returned (Europe/Berlin)."""
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
         
@@ -320,8 +320,9 @@ class TestLocationFilesDateFilter:
         today = datetime.now(berlin_tz).strftime("%Y%m%d")
         yesterday = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
         two_days_ago = (datetime.now(berlin_tz) - timedelta(days=2)).strftime("%Y%m%d")
+        three_days_ago = (datetime.now(berlin_tz) - timedelta(days=3)).strftime("%Y%m%d")
         
-        # Create location files for today, yesterday, and 2 days ago
+        # Create location files for today, yesterday, 2 days ago, and 3 days ago
         (tmp_path / f"location_{today}.txt").write_text(
             "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
         )
@@ -331,9 +332,12 @@ class TestLocationFilesDateFilter:
         (tmp_path / f"location_{two_days_ago}.txt").write_text(
             "FLRABCDEF,47.7,13.2,270,1400,90,1.0,1705312400,<\n"
         )
+        (tmp_path / f"location_{three_days_ago}.txt").write_text(
+            "FLRGHIJKL,47.8,13.3,45,1300,80,0.5,1705312500,v\n"
+        )
         
         names_file = tmp_path / "names.csv"
-        names_file.write_text("fid,name\nFLR123456,Pilot Today\nFLR789012,Pilot Yesterday\nFLRABCDEF,Pilot Old\n")
+        names_file.write_text("fid,name\nFLR123456,Pilot Today\nFLR789012,Pilot Yesterday\nFLRABCDEF,Pilot 2 Days\nFLRGHIJKL,Pilot 3 Days\n")
         
         import src.ogn_server.config as config
         monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
@@ -341,15 +345,16 @@ class TestLocationFilesDateFilter:
         from src.ogn_server.telegram_bot import scan_location_files
         result = scan_location_files()
         
-        # Should have data for today only
+        # Should have data for retention period (2 days: today + yesterday)
         all_dates = set()
         for nick_data in result.values():
             for flarm_dates in nick_data.values():
                 all_dates.update(flarm_dates)
         
         assert today in all_dates, f"Today ({today}) should be included"
-        assert yesterday not in all_dates, f"Yesterday ({yesterday}) should be filtered out"
-        assert two_days_ago not in all_dates, f"Two days ago ({two_days_ago}) should be filtered out"
+        assert yesterday in all_dates, f"Yesterday ({yesterday}) should be included (within retention)"
+        assert two_days_ago not in all_dates, f"Two days ago ({two_days_ago}) should be filtered out (beyond retention)"
+        assert three_days_ago not in all_dates, f"Three days ago ({three_days_ago}) should be filtered out"
 
     def test_scan_location_files_only_old_files(self, tmp_path, monkeypatch):
         """Test that when only old files exist, empty dict is returned."""
@@ -376,8 +381,8 @@ class TestLocationFilesDateFilter:
         # Should return empty since all files are too old
         assert result == {}
 
-    def test_scan_location_files_mixed_dates(self, tmp_path, monkeypatch):
-        """Test filtering with multiple dates including today."""
+    def test_scan_location_files_retention_boundary(self, tmp_path, monkeypatch):
+        """Test that dates beyond LOCATION_RETENTION_DAYS are filtered out."""
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
         
@@ -386,17 +391,19 @@ class TestLocationFilesDateFilter:
         berlin_tz = ZoneInfo("Europe/Berlin")
         today = datetime.now(berlin_tz).strftime("%Y%m%d")
         yesterday = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
+        two_days_ago = (datetime.now(berlin_tz) - timedelta(days=2)).strftime("%Y%m%d")
         three_days_ago = (datetime.now(berlin_tz) - timedelta(days=3)).strftime("%Y%m%d")
         one_week_ago = (datetime.now(berlin_tz) - timedelta(days=7)).strftime("%Y%m%d")
         
-        # Create files for various dates
+        # Create files for various dates to test retention boundary
         (tmp_path / f"location_{today}.txt").write_text("FLR111,47.5,13.0,180,1500,100,2.5,1705312245,^\n")
         (tmp_path / f"location_{yesterday}.txt").write_text("FLR222,47.6,13.1,90,1600,120,1.5,1705312300,>\n")
-        (tmp_path / f"location_{three_days_ago}.txt").write_text("FLR333,47.7,13.2,270,1400,90,1.0,1705312400,<\n")
-        (tmp_path / f"location_{one_week_ago}.txt").write_text("FLR444,47.8,13.3,45,1300,80,0.5,1705312500,v\n")
+        (tmp_path / f"location_{two_days_ago}.txt").write_text("FLR333,47.7,13.2,270,1400,90,1.0,1705312400,<\n")
+        (tmp_path / f"location_{three_days_ago}.txt").write_text("FLR444,47.8,13.3,45,1300,80,0.5,1705312500,v\n")
+        (tmp_path / f"location_{one_week_ago}.txt").write_text("FLR555,47.9,13.4,90,1200,70,0.3,1705312600,^\n")
         
         names_file = tmp_path / "names.csv"
-        names_file.write_text("fid,name\nFLR111,Today\nFLR222,Yesterday\nFLR333,Three Days\nFLR444,Week Ago\n")
+        names_file.write_text("fid,name\nFLR111,Today\nFLR222,Yesterday\nFLR333,Two Days\nFLR444,Three Days\nFLR555,Week Ago\n")
         
         import src.ogn_server.config as config
         monkeypatch.setattr(config.Config, 'NAMES_FILE', str(names_file))
@@ -410,10 +417,10 @@ class TestLocationFilesDateFilter:
             for flarm_dates in nick_data.values():
                 all_dates.update(flarm_dates)
         
-        # Only today should be present
-        assert len(all_dates) == 1, "Should have exactly 1 date (today)"
-        assert today in all_dates, "Should have today"
-        assert yesterday not in all_dates, "Yesterday should be filtered"
+        # Should include today and yesterday (within 2-day retention), exclude older
+        assert today in all_dates, "Today should be included"
+        assert yesterday in all_dates, "Yesterday should be included (within retention)"
+        assert two_days_ago not in all_dates, "Two days ago should be filtered (beyond retention)"
         assert three_days_ago not in all_dates, "Three days ago should be filtered"
         assert one_week_ago not in all_dates, "One week ago should be filtered"
 

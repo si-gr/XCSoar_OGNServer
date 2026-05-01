@@ -460,10 +460,14 @@ def scan_location_files() -> dict[str, dict[str, list[str]]]:
     if not location_dir.exists():
         return {}
 
-    # Calculate valid dates: today only (Europe/Berlin timezone)
+    # Calculate valid dates: last N days based on LOCATION_RETENTION_DAYS (Europe/Berlin timezone)
+    from datetime import timedelta
     berlin_tz = ZoneInfo("Europe/Berlin")
-    today_berlin = datetime.now(berlin_tz).strftime("%Y%m%d")
-    valid_dates = {today_berlin}
+    now = datetime.now(berlin_tz)
+    valid_dates = set()
+    for i in range(Config.LOCATION_RETENTION_DAYS):
+        date = now - timedelta(days=i)
+        valid_dates.add(date.strftime("%Y%m%d"))
 
     for loc_file in location_dir.glob("location*.txt"):
         fname = loc_file.name
