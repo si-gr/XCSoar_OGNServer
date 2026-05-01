@@ -196,16 +196,16 @@ class TestLocationHelpers:
 
     def test_scan_location_files_with_data(self, tmp_path, monkeypatch):
         """Test scan_location_files parses location files correctly."""
-        from datetime import datetime, timedelta
+        from datetime import datetime
         from zoneinfo import ZoneInfo
         
         monkeypatch.chdir(tmp_path)
 
-        # Use yesterday's date to ensure it passes the 2-day filter
+        # Use today's date since filtering is now today-only
         berlin_tz = ZoneInfo("Europe/Berlin")
-        yesterday = (datetime.now(berlin_tz) - timedelta(days=1)).strftime("%Y%m%d")
+        today = datetime.now(berlin_tz).strftime("%Y%m%d")
         
-        location_file = tmp_path / f"location_{yesterday}.txt"
+        location_file = tmp_path / f"location_{today}.txt"
         location_file.write_text(
             "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
             "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
@@ -223,7 +223,7 @@ class TestLocationHelpers:
 
         assert "Test Pilot" in result
         assert "FLR123456" in result["Test Pilot"]
-        assert yesterday in result["Test Pilot"]["FLR123456"]
+        assert today in result["Test Pilot"]["FLR123456"]
 
     def test_generate_full_igc_basic(self, tmp_path, monkeypatch):
         """Test generate_full_igc produces valid IGC format."""
@@ -305,11 +305,11 @@ class TestLocationHelpers:
             f"A-record mismatch: got '{lines[0]}', expected '{expected_a_record}'"
 
 
-class TestLocationFilesTwoDayFilter:
-    """Unit tests for scan_location_files() 2-day filtering logic."""
+class TestLocationFilesDateFilter:
+    """Unit tests for scan_location_files() today-only filtering logic."""
 
-    def test_scan_location_files_filters_to_last_2_days(self, tmp_path, monkeypatch):
-        """Test that only today and yesterday dates are returned (Europe/Berlin)."""
+    def test_scan_location_files_filters_to_today_only(self, tmp_path, monkeypatch):
+        """Test that only today's date is returned (Europe/Berlin)."""
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
         
@@ -341,14 +341,14 @@ class TestLocationFilesTwoDayFilter:
         from src.ogn_server.telegram_bot import scan_location_files
         result = scan_location_files()
         
-        # Should have data for today and yesterday
+        # Should have data for today only
         all_dates = set()
         for nick_data in result.values():
             for flarm_dates in nick_data.values():
                 all_dates.update(flarm_dates)
         
         assert today in all_dates, f"Today ({today}) should be included"
-        assert yesterday in all_dates, f"Yesterday ({yesterday}) should be included"
+        assert yesterday not in all_dates, f"Yesterday ({yesterday}) should be filtered out"
         assert two_days_ago not in all_dates, f"Two days ago ({two_days_ago}) should be filtered out"
 
     def test_scan_location_files_only_old_files(self, tmp_path, monkeypatch):
@@ -377,7 +377,7 @@ class TestLocationFilesTwoDayFilter:
         assert result == {}
 
     def test_scan_location_files_mixed_dates(self, tmp_path, monkeypatch):
-        """Test filtering with multiple dates including today/yesterday."""
+        """Test filtering with multiple dates including today."""
         from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
         
@@ -410,9 +410,10 @@ class TestLocationFilesTwoDayFilter:
             for flarm_dates in nick_data.values():
                 all_dates.update(flarm_dates)
         
-        # Only today and yesterday should be present
-        assert len(all_dates) <= 2, "Should have at most 2 dates"
-        assert today in all_dates or yesterday in all_dates, "Should have at least today or yesterday"
+        # Only today should be present
+        assert len(all_dates) == 1, "Should have exactly 1 date (today)"
+        assert today in all_dates, "Should have today"
+        assert yesterday not in all_dates, "Yesterday should be filtered"
         assert three_days_ago not in all_dates, "Three days ago should be filtered"
         assert one_week_ago not in all_dates, "One week ago should be filtered"
 

@@ -25,6 +25,19 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 
+class OGNCloseoutFilter(logging.Filter):
+    """Filter to suppress the 'Read returns zero length string' warning from OGN library.
+    
+    This message is logged by ogn.client when the server closes the connection normally.
+    It's not an error condition, just informational about connection closeout.
+    """
+    def filter(self, record):
+        # Suppress the specific closeout warning message
+        if "Read returns zero length string" in record.getMessage():
+            return False
+        return True
+
+
 class OGNClient:
     def __init__(self, serverdata: list):
         self.serverdata = serverdata
@@ -46,6 +59,11 @@ class OGNClient:
         self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
         self.client = None
         self._last_rotation_check_time = 0
+        
+        # Suppress OGN library's closeout warning (normal disconnection)
+        ogn_client_logger = logging.getLogger('ogn.client.client')
+        ogn_client_logger.addFilter(OGNCloseoutFilter())
+        
         self._migrate_location_file()
 
     def refresh_ddb_devices(self) -> int:
@@ -147,7 +165,14 @@ class OGNClient:
                 continue
             
             try:
-                timestamp = int(parts[7])
+                ts_str = parts[7].strip()
+                # Try Unix timestamp first (integer)
+                if ts_str.isdigit():
+                    timestamp = int(ts_str)
+                else:
+                    # Parse ISO format datetime string
+                    dt = datetime.datetime.fromisoformat(ts_str)
+                    timestamp = int(dt.timestamp())
                 entry_date = datetime.date.fromtimestamp(timestamp)
                 
                 if entry_date == today:
@@ -183,8 +208,15 @@ class OGNClient:
                 parts = entry.split(",")
                 if len(parts) >= 8:
                     try:
-                        timestamps.append(int(parts[7]))
-                    except ValueError:
+                        ts_str = parts[7].strip()
+                        # Try Unix timestamp first (integer)
+                        if ts_str.isdigit():
+                            timestamps.append(int(ts_str))
+                        else:
+                            # Parse ISO format datetime string
+                            dt = datetime.datetime.fromisoformat(ts_str)
+                            timestamps.append(int(dt.timestamp()))
+                    except (ValueError, IndexError):
                         pass
             
             if not timestamps:
@@ -194,8 +226,13 @@ class OGNClient:
             oldest_date = datetime.date.fromtimestamp(oldest_ts)
             today = datetime.date.today()
             
+            logger.info(f"Location file oldest entry check: {oldest_date} (vs today: {today})")
+            
             if oldest_date >= today:
+                logger.debug("Location file rotation skipped: all entries from today")
                 return
+            
+            logger.info(f"Location file rotation triggered: oldest entry from {oldest_date}")
             
             today_entries, historical_entries = self._get_entry_dates(entries)
             
@@ -216,7 +253,7 @@ class OGNClient:
                 with open(location_path, "a") as f:
                     f.write(entry + "\n")
             
-            logger.info(f"Rotated location.txt: {len(historical_entries)} days archived, {len(today_entries)} today's entries")
+            logger.info(f"Rotated location.txt: archived {sum(len(v) for v in historical_entries.values())} historical entries across {len(historical_entries)} day(s), kept {len(today_entries)} today's entries")
         
         except Exception as e:
             logger.warning(f"Failed to rotate location file: {e}")
