@@ -195,43 +195,52 @@ def generate_full_igc(
     loc_rows = [r for r in rows if _row_matches(r)]
     if not loc_rows:
         raise ValueError("No location data found")
-
-    # Helpers
+    
     berlin_tz = ZoneInfo("Europe/Berlin")
+    
     def parse_ts(val):
         if val is None:
             return None
         s = str(val).strip()
         if s == "":
             return None
-        # Unix timestamp seconds
         if s.isdigit():
             try:
                 return datetime.utcfromtimestamp(int(s))
             except Exception:
                 return None
-        # ISO-like formats
         try:
             return datetime.fromisoformat(s)
         except Exception:
             pass
-        # Fallback generic parse
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S%z"):
             try:
                 return datetime.strptime(s, fmt)
             except Exception:
                 continue
         return None
-
+    
     def to_berlin(dt_obj: datetime) -> datetime:
         if dt_obj is None:
             return None
         if dt_obj.tzinfo is None:
-            # Assume UTC then convert
             dt_utc = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
         else:
             dt_utc = dt_obj
         return dt_utc.astimezone(berlin_tz)
+    
+    has_matching_date = False
+    for r in loc_rows:
+        ts = r[7] if len(r) > 7 else None
+        dtv = parse_ts(ts)
+        if dtv is not None:
+            dt_local = to_berlin(dtv)
+            if dt_local.strftime("%Y%m%d") == date_str:
+                has_matching_date = True
+                break
+    
+    if not has_matching_date:
+        raise ValueError(f"No location data found for {date_str}")
 
     # Build H-records
     first_ts = None
@@ -336,6 +345,10 @@ def generate_full_igc(
             if dtv is None:
                 continue
             dt_local = to_berlin(dtv)
+            
+            record_date = dt_local.strftime("%Y%m%d")
+            if record_date != date_str:
+                continue
         except Exception:
             continue
         hh = dt_local.hour

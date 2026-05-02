@@ -227,12 +227,18 @@ class TestLocationHelpers:
 
     def test_generate_full_igc_basic(self, tmp_path, monkeypatch):
         """Test generate_full_igc produces valid IGC format."""
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+        
         monkeypatch.chdir(tmp_path)
 
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        ts_apr28 = int(datetime(2026, 4, 28, 10, 0, 0, tzinfo=berlin_tz).timestamp())
+        
         location_file = tmp_path / "location_20260428.txt"
         location_file.write_text(
             "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
-            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+            f"FLR123456,47.5,13.0,180,1500,100,2.5,{ts_apr28},^\n"
         )
 
         import pandas as pd
@@ -268,12 +274,16 @@ class TestLocationHelpers:
     def test_generate_full_igc_has_a_record(self, tmp_path, monkeypatch):
         """Test generate_full_igc produces IGC with valid A-record as FIRST line."""
         import re
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
         
-        # Create mock location file (required for generate_full_igc to work)
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        ts_apr28 = int(datetime(2026, 4, 28, 10, 0, 0, tzinfo=berlin_tz).timestamp())
+        
         location_file = tmp_path / "location_20260428.txt"
         location_file.write_text(
             "# address,lat,lon,track,altitude,ground_speed,climb_rate,timestamp,symbolcode\n"
-            "FLR123456,47.5,13.0,180,1500,100,2.5,1705312245,^\n"
+            f"FLR123456,47.5,13.0,180,1500,100,2.5,{ts_apr28},^\n"
         )
         
         monkeypatch.chdir(tmp_path)
@@ -288,12 +298,9 @@ class TestLocationHelpers:
         
         lines = igc_content.split('\n')
         
-        # A-record MUST be first line per IGC specification
         assert len(lines) > 0, "IGC content should not be empty"
         assert lines[0].startswith('A'), f"A-record must be FIRST line, got: {lines[0]}"
         
-        # Validate A-record format: A + 3 letters + 3 alphanumeric + optional text
-        # Example: AXXX001OGNServer
         a_record_pattern = r'^A[A-Z]{3}[A-Z0-9]{3}.*$'
         assert re.match(a_record_pattern, lines[0]), \
             f"A-record format invalid: {lines[0]} (expected pattern: {a_record_pattern})"

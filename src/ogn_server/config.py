@@ -29,7 +29,7 @@ class Config:
     LOCATION_ROTATION_CHECK_INTERVAL_SECONDS = 900
     LOCATION_FILTER_DEGREES = 0.2
     
-    IGC_RETENTION_DAYS = 30
+    IGC_RETENTION_DAYS = 7
     
     # DDB (FLARM Device Database) configuration
     DDB_URL = "http://ddb.glidernet.org/download/?j=1&t=1"
