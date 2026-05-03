@@ -576,34 +576,6 @@ class OGNClient:
                 else:
                     # Remove from offline tracking if back on-field
                     self._offline_aircraft.pop(address, None)
-                # JSON structured log for geofence status
-                try:
-                    geofence_status_log = json.dumps({
-                        "type": "geofence_event",
-                        "address": address,
-                        "latitude": beacon["latitude"],
-                        "longitude": beacon["longitude"],
-                        "timestamp": ts_berlin.isoformat(),
-                        "off_field": geofence_off,
-                    })
-                    logger.info(geofence_status_log)
-                except Exception:
-                    pass
-                # JSON structured log for SAR updates
-                try:
-                    sar_log = json.dumps({
-                        "type": "sar_position_update",
-                        "address": address,
-                        "latitude": beacon["latitude"],
-                        "longitude": beacon["longitude"],
-                        "altitude": beacon["altitude"],
-                        "timestamp": timestamp_str,
-                        "registration": registration,
-                    })
-                    logger.info(sar_log)
-                except Exception:
-                    # Do not let logging failures affect beacon processing
-                    pass
         
         if "address" in beacon:
             self._write_igc_file(beacon)
