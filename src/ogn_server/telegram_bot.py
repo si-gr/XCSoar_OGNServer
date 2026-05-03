@@ -615,6 +615,8 @@ async def post_init(application: Application) -> None:
         BotCommand("refreshddb", "Refresh DDB"),
         BotCommand("igc", "Request IGC files"),
         BotCommand("loc2igc", "Convert location to IGC"),
+        BotCommand("overdue", "List overdue aircraft for SAR"),
+        BotCommand("quickadd", "Quick-add from live beacons"),
         BotCommand("cancel", "Cancel operation"),
     ]
     group_commands = private_commands.copy()
@@ -639,19 +641,23 @@ class TelegramBot:
         if update.message is None:
             return
         commands_text = (
-            r"*Available Commands:*" + "\n"
-            r"/start \- Show this help message\\" + "\n"
-            r"/a \<fid,name\> \- Add a glider nickname\\" + "\n"
-            r"   Example: `/a FLR123456,John Doe`\\" + "\n"
-            r"/d \- Delete a glider nickname \(interactive\)\\" + "\n"
-            r"   Shows list of aircraft, select to delete\\" + "\n"
-            r"/refreshddb \- Refresh FLARM device database\\" + "\n"
-            r"   Downloads latest data from glidernet\\" + "\n"
-            r"/igc \- Request IGC flight files\\" + "\n"
-            r"   Interactive aircraft and date selection\\" + "\n"
-            r"/loc2igc \- Convert location\.txt to IGC\\" + "\n"
-            r"   Generate IGC from recorded locations\\" + "\n"
-            r"/cancel \- Cancel current operation\\" + "\n"
+            "*Available Commands:*" + "\n"
+            "/start \\- Show this help message" + "\n"
+            "/a \\<fid,name\\> \\- Add a glider nickname" + "\n"
+            "   Example: `/a FLR123456,John Doe`" + "\n"
+            "/d \\- Delete a glider nickname \\(interactive\\)" + "\n"
+            "   Shows list of aircraft, select to delete" + "\n"
+            "/refreshddb \\- Refresh FLARM device database" + "\n"
+            "   Downloads latest data from glidernet" + "\n"
+            "/igc \\- Request IGC flight files" + "\n"
+            "   Interactive aircraft and date selection" + "\n"
+            "/loc2igc \\- Convert location\\.txt to IGC" + "\n"
+            "   Generate IGC from recorded locations" + "\n"
+            "/overdue \\- List overdue aircraft for SAR" + "\n"
+            "   Export as JSON or CSV for rescue teams" + "\n"
+            "/quickadd \\- Quick\\-add gliders from live beacons" + "\n"
+            "   Select from currently flying aircraft" + "\n"
+            "/cancel \\- Cancel current operation" + "\n"
         )
         await update.message.reply_markdown_v2(commands_text)
 
@@ -778,6 +784,9 @@ class TelegramBot:
     async def check_geofence_alerts(self) -> None:
         """Check for off-field aircraft that are stationary and alert admin."""
         offline = []
+        # Sub-task 1: Ensure names_df loaded before geofence checks
+        if self.names_df is None:
+            self._load_names_df()
         try:
             if self.ogn_client and hasattr(self.ogn_client, 'get_offline_aircraft'):
                 offline = self.ogn_client.get_offline_aircraft(threshold_minutes=Config.GEOFENCE_OFFLINE_THRESHOLD_MINUTES)
@@ -793,6 +802,14 @@ class TelegramBot:
             address = ac.get('address')
             if not address:
                 continue
+            # Sub-task 2: Filter: only alert for registered aircraft (in names.csv)
+            try:
+                if self.names_df is None or 'fid' not in self.names_df.columns:
+                    continue
+                if address not in self.names_df['fid'].values:
+                    continue
+            except Exception:
+                continue
             last_ts = self._alerted_offline.get(address)
             if last_ts and (now - last_ts).total_seconds() < cooldown * 60:
                 continue
@@ -800,12 +817,12 @@ class TelegramBot:
             lat = pos.get('lat', 0)
             lon = pos.get('lon', 0)
             last_seen = ac.get('last_seen', 'Unknown')
-            msg = "⚠️ GEOFENCE ALERT\\n\\n"
-            msg += "Aircraft off-field and stationary\\n\\n"
-            msg += f"FLARM ID: {address}\\n"
-            msg += f"Last position: {lat:.4f}, {lon:.4f}\\n"
-            msg += f"Last seen: {last_seen}\\n"
-            msg += "Status: OFF-FIELD\\n\\n"
+            msg = "⚠️ GEOFENCE ALERT\n\n"
+            msg += "Aircraft off-field and stationary\n\n"
+            msg += f"FLARM ID: {address}\n"
+            msg += f"Last position: {lat:.4f}, {lon:.4f}\n"
+            msg += f"Last seen: {last_seen}\n"
+            msg += "Status: OFF-FIELD\n\n"
             msg += "Please verify aircraft safety."
             try:
                 admin_id = int(Config.load_admin_chat_id())
@@ -840,6 +857,80 @@ class TelegramBot:
                 logger.error(f"Failed to send geofence alert: {e}")
         # end for
 
+    async def check_missing_aircraft_alerts(self) -> None:
+        """Check for registered aircraft that have disappeared from OGN tracker."""
+        # Ensure names_df is loaded
+        if self.names_df is None:
+            self._load_names_df()
+        if self.names_df is None or 'fid' not in self.names_df.columns:
+            return
+        missing = []
+        try:
+            if self.ogn_client and hasattr(self.ogn_client, 'get_missing_aircraft'):
+                missing = self.ogn_client.get_missing_aircraft(threshold_minutes=Config.MISSING_AIRCRAFT_THRESHOLD_MINUTES)
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Missing aircraft check failed: {e}")
+            missing = []
+        if not hasattr(self, '_alerted_missing'):
+            self._alerted_missing = {}
+        now = datetime.utcnow() if hasattr(datetime, 'utcnow') else datetime.now()
+        cooldown = getattr(Config, 'MISSING_AIRCRAFT_ALERT_COOLDOWN_MINUTES', 30)
+        for ac in missing or []:
+            address = ac.get('address')
+            if not address:
+                continue
+            # Filter: only registered aircraft
+            try:
+                if self.names_df is None or 'fid' not in self.names_df.columns:
+                    continue
+                if address not in self.names_df['fid'].values:
+                    continue
+            except Exception:
+                continue
+            last_ts = self._alerted_missing.get(address)
+            if last_ts and (now - last_ts).total_seconds() < cooldown * 60:
+                continue
+            last_seen = ac.get('last_seen', 'Unknown')
+            seconds_ago = ac.get('seconds_ago', 0)
+            msg = "🛟 MISSING AIRCRAFT ALERT\n\n"
+            msg += "Aircraft has stopped transmitting\n\n"
+            msg += f"FLARM ID: {address}\n"
+            msg += f"Last seen: {last_seen}\n"
+            msg += f"Time since last beacon: {int(seconds_ago / 60)} minutes\n"
+            msg += "Status: SIGNAL LOST\n\n"
+            msg += "Please verify aircraft safety."
+            try:
+                admin_id = int(Config.load_admin_chat_id())
+            except Exception:
+                admin_id = None
+            if not admin_id:
+                logger = logging.getLogger(__name__)
+                logger.error("Missing aircraft: admin chat id not configured")
+                continue
+            bot = None
+            if hasattr(self, 'application') and self.application is not None:
+                bot = getattr(self.application, 'bot', None)
+            if bot is None:
+                bot = getattr(self, 'bot', None)
+            if bot is None:
+                logger = logging.getLogger(__name__)
+                logger.error("Missing aircraft: Telegram bot instance not available")
+                continue
+            try:
+                await bot.send_message(chat_id=admin_id, text=msg, parse_mode='HTML')
+                self._alerted_missing[address] = now
+                log_line = {
+                    "type": "missing_aircraft_alert_sent",
+                    "address": address,
+                    "last_seen": last_seen,
+                    "admin_id": admin_id,
+                    "timestamp": now.isoformat()
+                }
+                logger.info(json.dumps(log_line))
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to send missing aircraft alert: {e}")
     async def add(self, update: Update, context: CallbackContext) -> None:
         """Handle /a command - add a glider nickname."""
         if update.message is None:
@@ -849,7 +940,7 @@ class TelegramBot:
             return
         if context.args is None or len(context.args) != 1:
             await update.message.reply_markdown_v2(
-                r"Usage: /a \<fid,name\>\\" + "\n" + r"Example: `/a FLR123456,John Doe`"
+                "Usage: /a \\<fid,name\\>" + "\n" + "Example: \\`/a FLR123456,John Doe\\`"
             )
             return
         if len(context.args[0]) > 0 and "," in context.args[0]:
@@ -860,7 +951,7 @@ class TelegramBot:
             )
         else:
             await update.message.reply_markdown_v2(
-                r"Usage: /a \<fid,name\>\\" + "\n" + r"Example: `/a FLR123456,John Doe`"
+                "Usage: /a \\<fid,name\\>" + "\n" + "Example: \\`/a FLR123456,John Doe\\`"
             )
     
     async def delete_command(self, update: Update, context: CallbackContext) -> int:
@@ -1473,6 +1564,18 @@ class TelegramBot:
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to initialize geofence alert scheduler: {e}")
+        
+        # Initialize missing aircraft alert scheduler
+        try:
+            self.scheduler.add_job(
+                self.check_missing_aircraft_alerts,
+                'interval',
+                seconds=Config.GEOFENCE_CHECK_INTERVAL_SECONDS,
+                id='missing_aircraft_alert_check'
+            )
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to initialize missing aircraft alert scheduler: {e}")
         
         add_handler = CommandHandler('a', self.add)
         overdue_handler = CommandHandler('overdue', self.overdue_command)

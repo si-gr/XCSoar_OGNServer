@@ -46,9 +46,11 @@ class Config:
     API_LOC_FILTER_INDEX = 4
     # Geofence configuration
     GEOFENCE_FILE = "geofences.json"
-    GEOFENCE_OFFLINE_THRESHOLD_MINUTES = 10
+    GEOFENCE_OFFLINE_THRESHOLD_MINUTES = 5  # Changed from 10 to 5 minutes
     GEOFENCE_CHECK_INTERVAL_SECONDS = 60
     GEOFENCE_ALERT_COOLDOWN_MINUTES = 30
+    MISSING_AIRCRAFT_THRESHOLD_MINUTES = 15  # NEW: for missing aircraft alerts
+    MISSING_AIRCRAFT_ALERT_COOLDOWN_MINUTES = 30  # NEW: cooldown per aircraft
     
     @classmethod
     def load_serverdata(cls, validate: bool = True):

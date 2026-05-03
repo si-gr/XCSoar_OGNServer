@@ -640,6 +640,33 @@ class OGNClient:
                 offline.append(info)
         return offline
 
+    def get_missing_aircraft(self, threshold_minutes: int = 15) -> list[dict]:
+        """Get aircraft that haven't sent any beacon for >threshold_minutes."""
+        missing: list[dict] = []
+        if not getattr(self, "_last_beacon_times", None):
+            return missing
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        now_berlin = datetime.datetime.now(berlin_tz)
+        for address, last_beacon_time in list(self._last_beacon_times.items()):
+            if isinstance(last_beacon_time, datetime.datetime):
+                if last_beacon_time.tzinfo is None:
+                    last_beacon_time = last_beacon_time.replace(tzinfo=berlin_tz)
+                else:
+                    last_beacon_time = last_beacon_time.astimezone(berlin_tz)
+            else:
+                try:
+                    last_beacon_time = datetime.datetime.fromtimestamp(int(last_beacon_time), tz=berlin_tz)
+                except Exception:
+                    continue
+            delta = now_berlin - last_beacon_time
+            if delta.total_seconds() > threshold_minutes * 60:
+                missing.append({
+                    "address": address,
+                    "last_seen": last_beacon_time.isoformat(),
+                    "seconds_ago": delta.total_seconds()
+                })
+        return missing
+
     def run(self, callback: Optional[Callable] = None, autoreconnect: bool = True):
         import time
         logger.info("Starting OGN client...")
