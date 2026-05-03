@@ -8,3 +8,5 @@ prometheus-client
 APScheduler==3.10.4
 pytz
 requests
+psutil
+flask-cors
