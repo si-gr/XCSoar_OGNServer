@@ -643,7 +643,7 @@ class TelegramBot:
             r"/start \- Show this help message\\" + "\n"
             r"/a \<fid,name\> \- Add a glider nickname\\" + "\n"
             r"   Example: `/a FLR123456,John Doe`\\" + "\n"
-            r"/d \- Delete a glider nickname \(interactive)\\" + "\n"
+            r"/d \- Delete a glider nickname \(interactive\)\\" + "\n"
             r"   Shows list of aircraft, select to delete\\" + "\n"
             r"/refreshddb \- Refresh FLARM device database\\" + "\n"
             r"   Downloads latest data from glidernet\\" + "\n"
