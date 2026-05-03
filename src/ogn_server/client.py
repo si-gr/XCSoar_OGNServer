@@ -10,6 +10,10 @@ from typing import Callable, Optional
 import pandas as pd
 from ogn.client import AprsClient, settings as ogn_settings
 from ogn.parser import parse, AprsParseError
+from zoneinfo import ZoneInfo
+
+# Geofence utilities
+from .geofence import load_geofences, is_off_field
 
 from .beacon import Beacon
 from .config import Config
@@ -59,6 +63,18 @@ class OGNClient:
         self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
         self.client = None
         self._last_rotation_check_time = 0
+        # SAR: last known position caches for each FLARM address
+        # Stores last known position data per aircraft
+        self._last_position_cache: dict[str, dict] = {}
+        # Stores last beacon timestamp per aircraft (Berlin time handling below)
+        self._last_beacon_times: dict[str, datetime.datetime] = {}
+        # Geofence: loaded geofences and offline/off-field aircraft cache
+        try:
+            self._geofences = load_geofences(Config.GEOFENCE_FILE)
+        except Exception as e:
+            logger.warning(f"Geofence file could not be loaded: {e}. Geofencing disabled.")
+            self._geofences = []
+        self._offline_aircraft: dict[str, dict] = {}
         
         # Suppress OGN library's closeout warning (normal disconnection)
         ogn_client_logger = logging.getLogger('ogn.client.client')
@@ -521,8 +537,73 @@ class OGNClient:
                     self.current_messages[ind] = current_beacon
                 except ValueError:
                     self.current_messages.append(current_beacon)
-                
+
                 self._update_climb_history(beacon["address"], beacon["reference_timestamp"], beacon["climb_rate"], beacon["ground_speed"], beacon["track"])
+
+                # SAR: update last-known-position cache for this aircraft
+                address = beacon["address"]
+                # Compute Berlin time for the timestamp
+                ts = beacon["reference_timestamp"]
+                berlin_tz = ZoneInfo("Europe/Berlin")
+                if ts.tzinfo is None:
+                    ts_berlin = ts.replace(tzinfo=berlin_tz)
+                else:
+                    ts_berlin = ts.astimezone(berlin_tz)
+                timestamp_str = ts_berlin.isoformat()
+                registration = get_registration(address, self.ddb_devices)
+                self._last_position_cache[address] = {
+                    "address": address,
+                    "latitude": beacon["latitude"],
+                    "longitude": beacon["longitude"],
+                    "altitude": beacon["altitude"],
+                    "timestamp": timestamp_str,
+                    "registration": registration,
+                }
+                self._last_beacon_times[address] = ts_berlin
+                # GEofence monitoring: determine if the beacon is off-field and track offline aircraft
+                geofence_off = bool(is_off_field(beacon["latitude"], beacon["longitude"], self._geofences))
+                if geofence_off:
+                    self._offline_aircraft[address] = {
+                        "address": address,
+                        "last_position": {
+                            "lat": beacon["latitude"],
+                            "lon": beacon["longitude"],
+                            "alt": beacon["altitude"]
+                        },
+                        "last_seen": beacon["reference_timestamp"],
+                        "is_off_field": True
+                    }
+                else:
+                    # Remove from offline tracking if back on-field
+                    self._offline_aircraft.pop(address, None)
+                # JSON structured log for geofence status
+                try:
+                    geofence_status_log = json.dumps({
+                        "type": "geofence_event",
+                        "address": address,
+                        "latitude": beacon["latitude"],
+                        "longitude": beacon["longitude"],
+                        "timestamp": ts_berlin.isoformat(),
+                        "off_field": geofence_off,
+                    })
+                    logger.info(geofence_status_log)
+                except Exception:
+                    pass
+                # JSON structured log for SAR updates
+                try:
+                    sar_log = json.dumps({
+                        "type": "sar_position_update",
+                        "address": address,
+                        "latitude": beacon["latitude"],
+                        "longitude": beacon["longitude"],
+                        "altitude": beacon["altitude"],
+                        "timestamp": timestamp_str,
+                        "registration": registration,
+                    })
+                    logger.info(sar_log)
+                except Exception:
+                    # Do not let logging failures affect beacon processing
+                    pass
         
         if "address" in beacon:
             self._write_igc_file(beacon)
@@ -558,7 +639,35 @@ class OGNClient:
         
         self._cache[cache_key] = (time.time(), result)
         return result
-    
+
+    def get_offline_aircraft(self, threshold_minutes: int = 10) -> list[dict]:
+        """Get aircraft that are off-field and stationary for >threshold_minutes."""
+        offline: list[dict] = []
+        if not getattr(self, "_offline_aircraft", None):
+            return offline
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        now_berlin = datetime.datetime.now(berlin_tz)
+        for address, info in list(self._offline_aircraft.items()):
+            last_seen = info.get("last_seen")
+            last_seen_dt: datetime.datetime | None = None
+            if isinstance(last_seen, datetime.datetime):
+                if last_seen.tzinfo is None:
+                    last_seen_dt = last_seen.replace(tzinfo=berlin_tz)
+                else:
+                    last_seen_dt = last_seen.astimezone(berlin_tz)
+            else:
+                try:
+                    ts = int(last_seen)
+                    last_seen_dt = datetime.datetime.fromtimestamp(ts, tz=berlin_tz)
+                except Exception:
+                    last_seen_dt = None
+            if last_seen_dt is None:
+                continue
+            delta = now_berlin - last_seen_dt
+            if delta.total_seconds() > threshold_minutes * 60:
+                offline.append(info)
+        return offline
+
     def run(self, callback: Optional[Callable] = None, autoreconnect: bool = True):
         import time
         logger.info("Starting OGN client...")
@@ -611,3 +720,40 @@ class OGNClient:
             logger.info("OGN client shutdown completed")
         except Exception as e:
             logger.exception("OGN client shutdown failed: %s", e)
+
+    def get_overdue_aircraft(self, threshold_minutes: int = 30) -> list[dict]:
+        """Return a list of aircraft that have not reported a beacon within the threshold.
+
+        The comparison is performed in the Europe/Berlin timezone to align with SAR operations.
+
+        Args:
+            threshold_minutes: The overdue threshold in minutes (default 30).
+
+        Returns:
+            A list of last-known-position dictionaries for overdue aircraft. Each entry
+            contains address, latitude, longitude, altitude, timestamp (Berlin time),
+            and registration when available.
+        """
+        overdue: list[dict] = []
+        if not self._last_beacon_times:
+            return overdue
+
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        now_berlin = datetime.datetime.now(berlin_tz)
+        for address, last_ts in list(self._last_beacon_times.items()):
+            if last_ts is None:
+                continue
+            delta = now_berlin - last_ts
+            if delta.total_seconds() > threshold_minutes * 60:
+                pos = self._last_position_cache.get(address)
+                if pos:
+                    overdue.append(pos)
+        return overdue
+
+    def get_last_position(self, flarm_id: str) -> dict | None:
+        """Return the last known position for a given FLARM ID if available."""
+        return self._last_position_cache.get(flarm_id)
+
+    def get_all_last_positions(self) -> dict[str, dict]:
+        """Return all tracked last-known positions for SAR queries."""
+        return self._last_position_cache

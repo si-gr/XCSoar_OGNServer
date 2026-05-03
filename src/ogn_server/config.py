@@ -44,6 +44,11 @@ class Config:
     API_TARGET_LAT_INDEX = 2
     API_TARGET_LON_INDEX = 3
     API_LOC_FILTER_INDEX = 4
+    # Geofence configuration
+    GEOFENCE_FILE = "geofences.json"
+    GEOFENCE_OFFLINE_THRESHOLD_MINUTES = 10
+    GEOFENCE_CHECK_INTERVAL_SECONDS = 60
+    GEOFENCE_ALERT_COOLDOWN_MINUTES = 30
     
     @classmethod
     def load_serverdata(cls, validate: bool = True):

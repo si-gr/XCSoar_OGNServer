@@ -26,6 +26,8 @@ from telegram.ext import (
 from telegram.helpers import escape_markdown
 from .config import Config
 from io import BytesIO
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import json
 
  
 
@@ -43,6 +45,14 @@ LOC2IGC_GENERATING = 6
 # Delete Command Conversation States
 SELECTING_AIRCRAFT_FOR_DELETE = 7
 CONFIRMING_DELETION = 8
+
+# Quick Add Conversation States
+QUICKADD_SELECT = 12
+QUICKADD_CONFIRM = 13
+
+# Overdue SAR tracking conversation states
+OVERDUE_SHOW_LIST = 10
+OVERDUE_EXPORT = 11
 
 
 def format_size(num_bytes: int) -> str:
@@ -619,54 +629,239 @@ class TelegramBot:
         self.token = Config.load_private_key()
         self.application = None
         self.ogn_client = ogn_client
+        self.names_df = None
+        # Geofence alert scheduler and in-memory cooldown state
+        self.scheduler = None
+        self._alerted_offline = {}
     
     async def start(self, update: Update, context: CallbackContext) -> None:
         """Handle /start command - list all available commands."""
         if update.message is None:
             return
         commands_text = (
-            "*Available Commands:*\n"
-            "/start \- Show this help message\\\n"
-            "/a \<fid,name\> \- Add a glider nickname\\\n"
-            "   Example: `/a FLR123456,John Doe`\\\n"
-            "/d \- Delete a glider nickname \(interactive\)\\\n"
-            "   Shows list of aircraft, select to delete\\\n"
-            "/refreshddb \- Refresh FLARM device database\\\n"
-            "   Downloads latest data from glidernet\\\n"
-            "/igc \- Request IGC flight files\\\n"
-            "   Interactive aircraft and date selection\\\n"
-            "/loc2igc \- Convert location\.txt to IGC\\\n"
-            "   Generate IGC from recorded locations\\\n"
-            "/cancel \- Cancel current operation\\\n"
+            r"*Available Commands:*" + "\n"
+            r"/start \- Show this help message\\" + "\n"
+            r"/a \<fid,name\> \- Add a glider nickname\\" + "\n"
+            r"   Example: `/a FLR123456,John Doe`\\" + "\n"
+            r"/d \- Delete a glider nickname \(interactive)\\" + "\n"
+            r"   Shows list of aircraft, select to delete\\" + "\n"
+            r"/refreshddb \- Refresh FLARM device database\\" + "\n"
+            r"   Downloads latest data from glidernet\\" + "\n"
+            r"/igc \- Request IGC flight files\\" + "\n"
+            r"   Interactive aircraft and date selection\\" + "\n"
+            r"/loc2igc \- Convert location\.txt to IGC\\" + "\n"
+            r"   Generate IGC from recorded locations\\" + "\n"
+            r"/cancel \- Cancel current operation\\" + "\n"
         )
         await update.message.reply_markdown_v2(commands_text)
 
 
-    async def add(self, update: Update, context: CallbackContext):
+    async def overdue_command(self, update: Update, context: CallbackContext) -> int:
+        """Show list of overdue aircraft for SAR."""
+        import json
+        logger = logging.getLogger(__name__)
+        # JSON structured log
         try:
-            if update.message is None:
-                return
-            if update.effective_user is None or update.effective_user.id != int(self.admin_id):
-                await update.message.reply_markdown_v2("Unauthorized")
-                return
-            if context.args is None or len(context.args) != 1:
-                await update.message.reply_markdown_v2(
-"Usage: /a \\<fid,name\\>\\nExample: `/a FLR123456,John Doe`"
-                )
-                return
-            if len(context.args[0]) > 0 and "," in context.args[0]:
-                with open(self.filename, "a") as out:
-                    out.write(context.args[0] + "\n")
-                await update.message.reply_markdown_v2(
-                "added " + escape_markdown(context.args[0], version=2)
-                )
-            else:
-                await update.message.reply_markdown_v2(
-"Usage: /a \\<fid,name\\>\\nExample: `/a FLR123456,John Doe`"
-                )
+            user_id = update.effective_user.id if update.effective_user else None
+            logger.info(json.dumps({
+                "event": "overdue_command",
+                "user_id": user_id,
+                "chat_id": (update.effective_chat.id if update.effective_chat else None),
+                "timestamp": datetime.utcnow().isoformat(),
+            }))
+        except Exception:
+            pass
+        if update.message is None:
+            return ConversationHandler.END
+        # Admin check
+        if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+            await update.message.reply_markdown_v2("Unauthorized")
+            return ConversationHandler.END
+        # Retrieve overdue aircraft from OGN client
+        overdue = []
+        if self.ogn_client and hasattr(self.ogn_client, 'get_overdue_aircraft'):
+            overdue = self.ogn_client.get_overdue_aircraft(threshold_minutes=30)
+        if not overdue:
+            await update.message.reply_text("✅ No overdue aircraft. All tracked aircraft are transmitting normally.")
+            return ConversationHandler.END
+
+        # Format message
+        msg = "📋 Overdue Aircraft Report\n\n"
+        for i, ac in enumerate(overdue, 1):
+            reg = ac.get('registration', 'Unknown')
+            last_pos = ac.get('last_position', {}) or {}
+            lat = last_pos.get('lat', 0)
+            lon = last_pos.get('lon', 0)
+            last_seen = ac.get('last_seen', 'Unknown')
+            minutes = ac.get('minutes_overdue', 0)
+            address = ac.get('address', '')
+            msg += f"{i}. {reg} ({address})\n"
+            msg += f"   Last seen: {lat:.4f}, {lon:.4f} @ {last_seen}\n"
+            msg += f"   Time since: {minutes} minutes\n\n"
+
+        msg += "[Export JSON] [Export CSV]"
+
+        # Show inline keyboard with export options
+        keyboard = [
+            [InlineKeyboardButton("Export JSON", callback_data="overdue_export_json"),
+             InlineKeyboardButton("Export CSV", callback_data="overdue_export_csv")],
+            [InlineKeyboardButton("Cancel", callback_data="cancel")]
+        ]
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
+        return OVERDUE_EXPORT
+
+    async def overdue_export(self, update: Update, context: CallbackContext) -> int:
+        """Export overdue aircraft list."""
+        logger = logging.getLogger(__name__)
+        # CallbackQuery based export
+        if update.callback_query is None:
+            return ConversationHandler.END
+        query = update.callback_query
+        await query.answer()
+
+        # Admin check
+        if (update.effective_user is None) or (update.effective_user.id != int(self.admin_id)):
+            await query.edit_message_text("Unauthorized")
+            return ConversationHandler.END
+
+        data = (query.data or "").lower()
+        if data == "cancel":
+            await query.edit_message_text("Cancelled")
+            return ConversationHandler.END
+
+        export_format = data.split('_')[-1]  # json or csv
+        overdue = []
+        if self.ogn_client and hasattr(self.ogn_client, 'get_overdue_aircraft'):
+            overdue = self.ogn_client.get_overdue_aircraft(threshold_minutes=30)
+
+        berlin_tz = ZoneInfo("Europe/Berlin")
+        from datetime import datetime as _dt
+        if export_format == 'json':
+            import json
+            export_data = {
+                "generated_at": _dt.now(berlin_tz).isoformat(),
+                "threshold_minutes": 30,
+                "aircraft": overdue,
+            }
+            json_str = json.dumps(export_data, indent=2)
+            await query.edit_message_text(text="📄 Exporting overdue aircraft list as JSON...")
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=json_str.encode('utf-8'),
+                filename=f"overdue_aircraft_{_dt.now(berlin_tz).strftime('%Y%m%d_%H%M%S')}.json",
+            )
+        else:  # csv
+            import csv
+            import io
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['FLARM_ID', 'Registration', 'Latitude', 'Longitude', 'Altitude', 'Last_Seen', 'Minutes_Overdue'])
+            for ac in overdue:
+                pos = ac.get('last_position', {})
+                writer.writerow([
+                    ac.get('address', ''),
+                    ac.get('registration', ''),
+                    pos.get('lat', ''),
+                    pos.get('lon', ''),
+                    pos.get('alt', ''),
+                    ac.get('last_seen', ''),
+                    ac.get('minutes_overdue', 0),
+                ])
+            await query.edit_message_text(text="📄 Exporting overdue aircraft list as CSV...")
+            await context.bot.send_document(
+                chat_id=query.message.chat_id,
+                document=output.getvalue().encode('utf-8'),
+                filename=f"overdue_aircraft_{_dt.now(berlin_tz).strftime('%Y%m%d_%H%M%S')}.csv",
+            )
+        return ConversationHandler.END
+
+    async def check_geofence_alerts(self) -> None:
+        """Check for off-field aircraft that are stationary and alert admin."""
+        offline = []
+        try:
+            if self.ogn_client and hasattr(self.ogn_client, 'get_offline_aircraft'):
+                offline = self.ogn_client.get_offline_aircraft(threshold_minutes=Config.GEOFENCE_OFFLINE_THRESHOLD_MINUTES)
         except Exception as e:
-            if update and update.message:
-                await update.message.reply_markdown_v2(f"Error: {escape_markdown(str(e), version=2)}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Geofence check failed while fetching offline aircraft: {e}")
+            offline = []
+        if not hasattr(self, '_alerted_offline'):
+            self._alerted_offline = {}
+        now = datetime.utcnow() if hasattr(datetime, 'utcnow') else datetime.now()
+        cooldown = getattr(Config, 'GEOFENCE_ALERT_COOLDOWN_MINUTES', 30)
+        for ac in offline or []:
+            address = ac.get('address')
+            if not address:
+                continue
+            last_ts = self._alerted_offline.get(address)
+            if last_ts and (now - last_ts).total_seconds() < cooldown * 60:
+                continue
+            pos = ac.get('last_position', {}) or {}
+            lat = pos.get('lat', 0)
+            lon = pos.get('lon', 0)
+            last_seen = ac.get('last_seen', 'Unknown')
+            msg = "⚠️ GEOFENCE ALERT\\n\\n"
+            msg += "Aircraft off-field and stationary\\n\\n"
+            msg += f"FLARM ID: {address}\\n"
+            msg += f"Last position: {lat:.4f}, {lon:.4f}\\n"
+            msg += f"Last seen: {last_seen}\\n"
+            msg += "Status: OFF-FIELD\\n\\n"
+            msg += "Please verify aircraft safety."
+            try:
+                admin_id = int(Config.load_admin_chat_id())
+            except Exception:
+                admin_id = None
+            if not admin_id:
+                logger = logging.getLogger(__name__)
+                logger.error("Geofence: admin chat id not configured")
+                continue
+            bot = None
+            if hasattr(self, 'application') and self.application is not None:
+                bot = getattr(self.application, 'bot', None)
+            if bot is None:
+                bot = getattr(self, 'bot', None)
+            if bot is None:
+                logger = logging.getLogger(__name__)
+                logger.error("Geofence: Telegram bot instance not available to send alert")
+                continue
+            try:
+                await bot.send_message(chat_id=admin_id, text=msg, parse_mode='HTML')
+                self._alerted_offline[address] = now
+                log_line = {
+                    "type": "geofence_alert_sent",
+                    "address": address,
+                    "position": pos,
+                    "admin_id": admin_id,
+                    "timestamp": now.isoformat()
+                }
+                logger.info(json.dumps(log_line))
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to send geofence alert: {e}")
+        # end for
+
+    async def add(self, update: Update, context: CallbackContext) -> None:
+        """Handle /a command - add a glider nickname."""
+        if update.message is None:
+            return
+        if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+            await update.message.reply_markdown_v2("Unauthorized")
+            return
+        if context.args is None or len(context.args) != 1:
+            await update.message.reply_markdown_v2(
+                r"Usage: /a \<fid,name\>\\" + "\n" + r"Example: `/a FLR123456,John Doe`"
+            )
+            return
+        if len(context.args[0]) > 0 and "," in context.args[0]:
+            with open(self.filename, "a", encoding="utf-8") as out:
+                out.write(context.args[0] + "\n")
+            await update.message.reply_markdown_v2(
+                "added " + escape_markdown(context.args[0], version=2)
+            )
+        else:
+            await update.message.reply_markdown_v2(
+                r"Usage: /a \<fid,name\>\\" + "\n" + r"Example: `/a FLR123456,John Doe`"
+            )
     
     async def delete_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /d command. Starts aircraft deletion conversation."""
@@ -896,6 +1091,181 @@ class TelegramBot:
         context.chat_data.clear()
         return ConversationHandler.END
 
+    # --- Quick Add (bulk add) conversation ---
+    async def quickadd_command(self, update: Update, context: CallbackContext) -> int:
+        """Scan live beacons and allow quick addition of aircraft."""
+        if update.message is None:
+            return ConversationHandler.END
+        # Admin check
+        user_id = update.effective_user.id if update.effective_user else None
+        admin_id = int(self.admin_id) if self.admin_id is not None else None
+        if user_id != admin_id:
+            await update.message.reply_text("Unauthorized. Only admins can add aircraft.")
+            return ConversationHandler.END
+
+        # Get all current positions from SAR tracking
+        all_positions = {}
+        if self.ogn_client and hasattr(self.ogn_client, 'get_all_last_positions'):
+            try:
+                all_positions = self.ogn_client.get_all_last_positions()
+            except Exception:
+                all_positions = {}
+
+        if not all_positions:
+            await update.message.reply_text("No aircraft currently tracked. Make sure OGN client is connected.")
+            return ConversationHandler.END
+
+        # Load existing names.csv if available
+        self._load_names_df()
+
+        # Build list of aircraft with DDB info
+        aircraft_list = []
+        for flarm_id, pos in (all_positions or {}).items():
+            reg = None
+            lat = pos.get('latitude', pos.get('lat', 0))
+            lon = pos.get('longitude', pos.get('lon', 0))
+            if isinstance(pos, dict):
+                reg = pos.get('registration', None)
+            if not reg:
+                reg = "Unknown"
+            # Skip already registered
+            if self.names_df is not None and 'fid' in self.names_df.columns:
+                try:
+                    if flarm_id in self.names_df['fid'].values:
+                        continue
+                except Exception:
+                    pass
+            aircraft_list.append({
+                'flarm_id': flarm_id,
+                'registration': reg,
+                'lat': float(lat) if lat is not None else 0.0,
+                'lon': float(lon) if lon is not None else 0.0,
+            })
+
+        if not aircraft_list:
+            await update.message.reply_text("All currently tracked aircraft are already in names.csv")
+            return ConversationHandler.END
+
+        # Store in context for next step
+        context.user_data['quickadd_aircraft'] = aircraft_list
+        context.user_data['quickadd_selected'] = set()
+
+        # Build inline keyboard with checkboxes
+        keyboard = []
+        for i, ac in enumerate(aircraft_list):
+            btn_text = f"{ac['registration']} ({ac['flarm_id']}) - {ac['lat']:.2f},{ac['lon']:.2f}"
+            keyboard.append([InlineKeyboardButton(f"☐ {btn_text}", callback_data=f"quickadd_toggle:{i}")])
+        keyboard.append([
+            InlineKeyboardButton("✅ Add Selected", callback_data="quickadd_confirm"),
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel")
+        ])
+
+        msg = f"🛩️ Quick Add - Currently Flying Aircraft\n\n"
+        msg += f"Found {len(aircraft_list)} unregistered aircraft.\n\n"
+        msg += f"Tap to select/deselect, then press 'Add Selected':"
+
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
+        return QUICKADD_SELECT
+
+    async def quickadd_toggle(self, update: Update, context: CallbackContext) -> int:
+        """Toggle aircraft selection in quickadd."""
+        query = update.callback_query
+        await query.answer()
+        if not query.data or not query.data.startswith("quickadd_toggle:"):
+            return QUICKADD_SELECT
+        idx = int(query.data.split(':')[1])
+        aircraft_list = context.user_data.get('quickadd_aircraft', [])
+        selected = context.user_data.get('quickadd_selected', set())
+
+        if idx in selected:
+            selected.remove(idx)
+        else:
+            selected.add(idx)
+
+        context.user_data['quickadd_selected'] = selected
+
+        # Rebuild keyboard with updated selections
+        keyboard = []
+        for i, ac in enumerate(aircraft_list):
+            checkbox = "✅" if i in selected else "☐"
+            btn_text = f"{ac['registration']} ({ac['flarm_id']}) - {ac['lat']:.2f},{ac['lon']:.2f}"
+            keyboard.append([InlineKeyboardButton(f"{checkbox} {btn_text}", callback_data=f"quickadd_toggle:{i}")])
+        keyboard.append([
+            InlineKeyboardButton(f"✅ Add Selected ({len(selected)})", callback_data="quickadd_confirm"),
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel")
+        ])
+
+        await query.edit_message_text(
+            text=f"🛩️ Quick Add - Currently Flying Aircraft\n\nSelected {len(selected)} of {len(aircraft_list)}:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return QUICKADD_SELECT
+
+    async def quickadd_confirm(self, update: Update, context: CallbackContext) -> int:
+        """Confirm and add selected aircraft to names.csv."""
+        query = update.callback_query
+        await query.answer()
+
+        aircraft_list = context.user_data.get('quickadd_aircraft', [])
+        selected_indices = context.user_data.get('quickadd_selected', set())
+
+        if not selected_indices:
+            await query.edit_message_text("No aircraft selected. Operation cancelled.")
+            return ConversationHandler.END
+
+        added = []
+        for idx in sorted(list(selected_indices)):
+            ac = aircraft_list[idx]
+            # Use existing add logic
+            self._add_to_names_csv(ac['flarm_id'], ac['registration'])
+            added.append(f"{ac['registration']} ({ac['flarm_id']})")
+
+        msg = f"✅ Successfully added {len(added)} aircraft:\n\n" + "\n".join(added)
+        await query.edit_message_text(msg)
+        # Clear context
+        context.user_data.pop('quickadd_aircraft', None)
+        context.user_data.pop('quickadd_selected', None)
+        return ConversationHandler.END
+
+    def _load_names_df(self) -> None:
+        """Load names.csv into self.names_df if pandas is available."""
+        self.names_df = None
+        try:
+            import pandas as pd  # type: ignore
+            names_path = Path(Config.NAMES_FILE)
+            if names_path.exists():
+                self.names_df = pd.read_csv(Config.NAMES_FILE, names=["fid", "name"], header=0)
+            else:
+                # Initialize empty dataframe with expected columns
+                self.names_df = pd.DataFrame(columns=["fid", "name"])
+        except Exception:
+            self.names_df = None
+
+    def _add_to_names_csv(self, flarm_id: str, name: str) -> None:
+        """Add a single entry to names.csv, avoiding duplicates."""
+        try:
+            # Lazy load
+            self._load_names_df()
+            if self.names_df is not None and 'fid' in self.names_df.columns:
+                try:
+                    if flarm_id in self.names_df['fid'].values:
+                        return
+                except Exception:
+                    pass
+                import pandas as pd  # local import
+                new_row = pd.DataFrame({'fid': [flarm_id], 'name': [name]})
+                self.names_df = pd.concat([self.names_df, new_row], ignore_index=True)
+                self.names_df.to_csv(Config.NAMES_FILE, index=False)
+                return
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to update names.csv: {e}")
+        # Fallback: append plain line
+        try:
+            with open(Config.NAMES_FILE, 'a', encoding='utf-8') as f:
+                f.write(f"{flarm_id},{name}\n")
+        except Exception:
+            pass
+
     async def cancel_igc(self, update: Update, context: CallbackContext) -> int:
         """Cancels the current IGC conversation."""
         if update.callback_query is not None:
@@ -1090,8 +1460,23 @@ class TelegramBot:
         # Daily restart scheduler removed
         
         self.application = Application.builder().token(self.token).post_init(post_init).build()
+        # Initialize geofence alert scheduler (background task)
+        try:
+            self.scheduler = AsyncIOScheduler()
+            self.scheduler.add_job(
+                self.check_geofence_alerts,
+                'interval',
+                seconds=Config.GEOFENCE_CHECK_INTERVAL_SECONDS,
+                id='geofence_alert_check'
+            )
+            self.scheduler.start()
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to initialize geofence alert scheduler: {e}")
         
         add_handler = CommandHandler('a', self.add)
+        overdue_handler = CommandHandler('overdue', self.overdue_command)
+        quickadd_handler = CommandHandler('quickadd', self.quickadd_command)
         # Replace simple /d handler with a ConversationHandler for deletion flow
         del_conv_handler = ConversationHandler(
             entry_points=[CommandHandler('d', self.delete_command)],
@@ -1113,6 +1498,22 @@ class TelegramBot:
         self.application.add_handler(del_conv_handler)
         self.application.add_handler(refresh_handler)
         self.application.add_handler(start_handler)
+        self.application.add_handler(overdue_handler)
+        # Quick Add conversation
+        quickadd_conv_handler = ConversationHandler(
+            entry_points=[quickadd_handler],
+            states={
+                QUICKADD_SELECT: [CallbackQueryHandler(self.quickadd_toggle, pattern=r"^quickadd_toggle:.*")],
+                QUICKADD_CONFIRM: [CallbackQueryHandler(self.quickadd_confirm, pattern=r"^quickadd_confirm$")],
+            },
+            fallbacks=[
+                CommandHandler('cancel', self.cancel_igc),
+                CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
+            ],
+            per_user=True,
+            conversation_timeout=CONVERSATION_TIMEOUT,
+        )
+        self.application.add_handler(quickadd_conv_handler)
         
         # IGC file request conversation
         igc_conv_handler = ConversationHandler(
@@ -1130,6 +1531,22 @@ class TelegramBot:
         )
 
         self.application.add_handler(igc_conv_handler)
+
+        # Overdue SAR conversation (list + export)
+        overdue_conv_handler = ConversationHandler(
+            entry_points=[overdue_handler],
+            states={
+                OVERDUE_SHOW_LIST: [CallbackQueryHandler(self.overdue_export, pattern=r"^overdue_export_.*|^cancel$")],
+                OVERDUE_EXPORT: [CallbackQueryHandler(self.overdue_export, pattern=r"^overdue_export_.*|^cancel$")],
+            },
+            fallbacks=[
+                CommandHandler('cancel', self.cancel_igc),
+                CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
+            ],
+            per_user=True,
+            conversation_timeout=CONVERSATION_TIMEOUT,
+        )
+        self.application.add_handler(overdue_conv_handler)
 
         
 
