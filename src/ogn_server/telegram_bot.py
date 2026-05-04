@@ -635,6 +635,43 @@ class TelegramBot:
         # Geofence alert scheduler and in-memory cooldown state
         self.scheduler = None
         self._alerted_offline = {}
+        # Store bot reference for chunked message sending
+        self.bot = None
+    
+    async def _send_chunked_messages(self, chat_id: int, text: str, reply_markup=None) -> None:
+        """Send long messages in chunks to avoid Telegram's 4096 char limit.
+        
+        Args:
+            chat_id: Target chat ID
+            text: Message text to send (may exceed 4096 chars)
+            reply_markup: Optional inline keyboard to attach to last message only
+        """
+        if not text:
+            return
+        
+        MAX_MESSAGE_LENGTH = 4096
+        messages = []
+        
+        while len(text) > MAX_MESSAGE_LENGTH:
+            # Find a good split point near the limit
+            chunk = text[:MAX_MESSAGE_LENGTH]
+            # Try to split at newline for cleaner messages
+            last_newline = chunk.rfind('\n')
+            if last_newline > MAX_MESSAGE_LENGTH // 2:
+                chunk = chunk[:last_newline]
+                text = text[last_newline + 1:]
+            else:
+                text = text[MAX_MESSAGE_LENGTH:]
+            messages.append(chunk)
+        
+        messages.append(text)  # Add remaining text
+        
+        # Send messages, last one gets the keyboard
+        for i, msg in enumerate(messages):
+            if i == len(messages) - 1:
+                await self.bot.send_message(chat_id, msg, reply_markup=reply_markup)
+            else:
+                await self.bot.send_message(chat_id, msg)
     
     async def start(self, update: Update, context: CallbackContext) -> None:
         """Handle /start command - list all available commands."""
@@ -687,6 +724,16 @@ class TelegramBot:
         overdue = []
         if self.ogn_client and hasattr(self.ogn_client, 'get_overdue_aircraft'):
             overdue = self.ogn_client.get_overdue_aircraft(threshold_minutes=30)
+        
+        # Filter: only show aircraft registered in names.csv
+        self._load_names_df()
+        if self.names_df is not None and 'fid' in self.names_df.columns:
+            try:
+                registered_fids = set(self.names_df['fid'].values)
+                overdue = [ac for ac in overdue if ac.get('address', '') in registered_fids]
+            except Exception:
+                pass
+        
         if not overdue:
             await update.message.reply_text("✅ No overdue aircraft. All tracked aircraft are transmitting normally.")
             return ConversationHandler.END
@@ -713,7 +760,11 @@ class TelegramBot:
              InlineKeyboardButton("Export CSV", callback_data="overdue_export_csv")],
             [InlineKeyboardButton("Cancel", callback_data="cancel")]
         ]
-        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard))
+        
+        # Use chunked messages to avoid 4096 char limit
+        chat_id = update.effective_chat.id if update.effective_chat else None
+        if chat_id is not None:
+            await self._send_chunked_messages(chat_id, msg, reply_markup=InlineKeyboardMarkup(keyboard))
         return OVERDUE_EXPORT
 
     async def overdue_export(self, update: Update, context: CallbackContext) -> int:
@@ -1307,11 +1358,19 @@ class TelegramBot:
         added = []
         for idx in sorted(list(selected_indices)):
             ac = aircraft_list[idx]
-            # Use existing add logic
             self._add_to_names_csv(ac['flarm_id'], ac['registration'])
             added.append(f"{ac['registration']} ({ac['flarm_id']})")
 
         msg = f"✅ Successfully added {len(added)} aircraft:\n\n" + "\n".join(added)
+        
+        # Truncate if message exceeds Telegram's 4096 char limit
+        MAX_MESSAGE_LENGTH = 4096
+        if len(msg) > MAX_MESSAGE_LENGTH:
+            note = f"\n\n(Note: {len(added)} total aircraft added)"
+            # Reserve space for the note
+            available_space = MAX_MESSAGE_LENGTH - len(note) - 3  # 3 for "..."
+            msg = msg[:available_space] + "..." + note
+        
         await query.edit_message_text(msg)
         # Clear context
         context.user_data.pop('quickadd_aircraft', None)
@@ -1551,6 +1610,8 @@ class TelegramBot:
         # Daily restart scheduler removed
         
         self.application = Application.builder().token(self.token).post_init(post_init).build()
+        # Store bot reference for _send_chunked_messages helper
+        self.bot = self.application.bot
         # Initialize geofence alert scheduler (background task)
         try:
             self.scheduler = AsyncIOScheduler()
