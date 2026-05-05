@@ -1683,7 +1683,10 @@ class TelegramBot:
             entry_points=[CommandHandler('igc', self.igc_command)],
             states={
                 SELECTING_AIRCRAFT: [CallbackQueryHandler(self.aircraft_selected, pattern=r"^aircraft:.*")],
-                SELECTING_DATE: [CallbackQueryHandler(self.date_selected, pattern=r"^date:.*")],
+                SELECTING_DATE: [
+                    CallbackQueryHandler(self.date_selected, pattern=r"^date:.*"),
+                    CallbackQueryHandler(self.date_selected, pattern=r"^back$"),
+                ],
             },
             fallbacks=[
                 CommandHandler('cancel', self.cancel_igc),
@@ -1717,8 +1720,14 @@ class TelegramBot:
         loc2igc_conv_handler = ConversationHandler(
             entry_points=[CommandHandler('loc2igc', self.loc2igc_command)],
             states={
-                LOC2IGC_SELECT_AIRCRAFT: [CallbackQueryHandler(self.loc2igc_aircraft_selected, pattern=r"^aircraft:.*")],
-                LOC2IGC_SELECT_DATE: [CallbackQueryHandler(self.loc2igc_date_selected, pattern=r"^date:.*")],
+                LOC2IGC_SELECT_AIRCRAFT: [
+                    CallbackQueryHandler(self.loc2igc_aircraft_selected, pattern=r"^aircraft:.*"),
+                    CallbackQueryHandler(self.loc2igc_aircraft_selected, pattern=r"^back$"),
+                ],
+                LOC2IGC_SELECT_DATE: [
+                    CallbackQueryHandler(self.loc2igc_date_selected, pattern=r"^date:.*"),
+                    CallbackQueryHandler(self.loc2igc_date_selected, pattern=r"^back$"),
+                ],
             },
             fallbacks=[CallbackQueryHandler(self.cancel_igc, pattern=r"^cancel$"), CommandHandler('cancel', self.cancel_igc)],
         )
