@@ -10,8 +10,6 @@ from typing import Callable, Optional
 import pandas as pd
 from ogn.client import AprsClient, settings as ogn_settings
 from ogn.parser import parse, AprsParseError
-from zoneinfo import ZoneInfo
-
 # Geofence utilities
 from .geofence import load_geofences, is_off_field
 
@@ -27,6 +25,165 @@ if not logger.handlers:
     handler.setFormatter(JSONFormatter())
     logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+
+# Plausibility check thresholds for beacon validation
+PLAUSIBILITY_MAX_GROUND_SPEED_MPS = 97.2      # 350 km/h in m/s (VNE + margin)
+PLAUSIBILITY_MAX_CLIMB_RATE_MPS = 8.0         # m/s positive (exceptional thermal)
+PLAUSIBILITY_MAX_SINK_RATE_MPS = -10.0        # m/s negative (spiral dive with airbrakes)
+PLAUSIBILITY_MIN_TIME_DELTA_SEC = 0.5          # reject duplicates/sub-second noise
+PLAUSIBILITY_MAX_TIME_DELTA_SEC = 3600.0      # reject 1-hour+ gaps
+PLAUSIBILITY_MAX_ALTITUDE_M = 10000.0         # maximum valid altitude (10km)
+EARTH_RADIUS_METERS = 6371000                  # Mean Earth radius for haversine
+
+
+def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate great-circle distance between two points using haversine formula."""
+    lat1_rad = math.radians(lat1)
+    lat2_rad = math.radians(lat2)
+    delta_lat = math.radians(lat2 - lat1)
+    delta_lon = math.radians(lon2 - lon1)
+    
+    a = (math.sin(delta_lat / 2) ** 2 + 
+         math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return EARTH_RADIUS_METERS * c
+
+
+def _calculate_ground_speed(lat1: float, lon1: float, lat2: float, lon2: float, dt_seconds: float) -> float:
+    """Calculate ground speed between two position fixes."""
+    if dt_seconds <= 0:
+        return float('inf')
+    
+    distance = _haversine_distance(lat1, lon1, lat2, lon2)
+    return distance / dt_seconds
+
+
+def _calculate_vertical_speed(alt1: float, alt2: float, dt_seconds: float) -> float:
+    """Calculate vertical speed (climb/sink rate) between two altitude fixes."""
+    if dt_seconds <= 0:
+        return float('inf')
+    
+    return (alt2 - alt1) / dt_seconds
+
+
+def _parse_timestamp(val) -> datetime.datetime | None:
+    """Parse timestamp string to datetime object."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s == "":
+        return None
+    if s.isdigit():
+        try:
+            return datetime.datetime.utcfromtimestamp(int(s))
+        except Exception:
+            return None
+    try:
+        return datetime.datetime.fromisoformat(s)
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S%z"):
+        try:
+            return datetime.datetime.strptime(s, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _is_beacon_plausible(
+    prev_beacon: dict | None,
+    curr_beacon: dict,
+    flarm_id: str
+) -> tuple[bool, str | None]:
+    """
+    Validate if a beacon is physically plausible compared to previous beacon.
+    
+    Parameters:
+        prev_beacon: Previous beacon dict or None if first
+        curr_beacon: Current beacon dict with keys: latitude, longitude, altitude, reference_timestamp
+        flarm_id: FLARM ID for logging
+    
+    Returns:
+        Tuple of (is_plausible: bool, reason: str | None)
+    
+    Validation checks (in order):
+        1. Altitude: <= 10,000m
+        2. Time delta: 0.5s <= dt <= 3600s
+        3. Ground speed: <= 97.2 m/s (350 km/h)
+        4. Climb rate: <= 8.0 m/s
+        5. Sink rate: >= -10.0 m/s
+    """
+    # First beacon always accepted (no previous point to compare)
+    if prev_beacon is None:
+        # But still check absolute altitude limit
+        alt = curr_beacon.get("altitude", 0)
+        if alt > PLAUSIBILITY_MAX_ALTITUDE_M:
+            return (False, f"altitude:{alt:.0f}m>{PLAUSIBILITY_MAX_ALTITUDE_M:.0f}m")
+        return (True, None)
+    
+    # Check absolute altitude limit first
+    alt = curr_beacon.get("altitude", 0)
+    if alt > PLAUSIBILITY_MAX_ALTITUDE_M:
+        return (False, f"altitude:{alt:.0f}m>{PLAUSIBILITY_MAX_ALTITUDE_M:.0f}m")
+    
+    # Parse timestamps
+    try:
+        prev_ts = prev_beacon.get("reference_timestamp")
+        curr_ts = curr_beacon.get("reference_timestamp")
+        
+        if prev_ts is None or curr_ts is None:
+            return (False, "invalid_timestamp")
+        
+        # Ensure both timestamps are naive UTC for comparison
+        if prev_ts.tzinfo is not None:
+            prev_dt = prev_ts.replace(tzinfo=None)
+        else:
+            prev_dt = prev_ts
+        
+        if curr_ts.tzinfo is not None:
+            curr_dt = curr_ts.replace(tzinfo=None)
+        else:
+            curr_dt = curr_ts
+        
+        dt = (curr_dt - prev_dt).total_seconds()
+    except Exception:
+        return (False, "invalid_timestamp")
+    
+    # Check time delta sanity
+    if dt < PLAUSIBILITY_MIN_TIME_DELTA_SEC:
+        return (False, f"dt_too_small:{dt:.1f}s")
+    
+    if dt > PLAUSIBILITY_MAX_TIME_DELTA_SEC:
+        return (False, f"dt_too_large:{dt:.0f}s")
+    
+    # Parse positions and altitudes
+    try:
+        prev_lat = float(prev_beacon.get("latitude", 0))
+        prev_lon = float(prev_beacon.get("longitude", 0))
+        prev_alt = float(prev_beacon.get("altitude", 0))
+        
+        curr_lat = float(curr_beacon.get("latitude", 0))
+        curr_lon = float(curr_beacon.get("longitude", 0))
+        curr_alt = float(curr_beacon.get("altitude", 0))
+    except (ValueError, TypeError):
+        return (False, "invalid_position_or_altitude")
+    
+    # Check ground speed
+    ground_speed = _calculate_ground_speed(prev_lat, prev_lon, curr_lat, curr_lon, dt)
+    if ground_speed > PLAUSIBILITY_MAX_GROUND_SPEED_MPS:
+        return (False, f"speed:{ground_speed:.1f}m/s")
+    
+    # Check vertical speed
+    vertical_speed = _calculate_vertical_speed(prev_alt, curr_alt, dt)
+    if vertical_speed > PLAUSIBILITY_MAX_CLIMB_RATE_MPS:
+        return (False, f"climb:{vertical_speed:.1f}m/s")
+    
+    if vertical_speed < PLAUSIBILITY_MAX_SINK_RATE_MPS:
+        return (False, f"sink:{vertical_speed:.1f}m/s")
+    
+    # All checks passed
+    return (True, None)
 
 
 class OGNCloseoutFilter(logging.Filter):
@@ -517,7 +674,14 @@ class OGNClient:
         if "address" in beacon and "ground_speed" in beacon and "climb_rate" in beacon:
             if "symbolcode" in beacon and self._is_valid_symbol(beacon["symbolcode"]):
                 if self._is_in_target_area(beacon):
-                    self._write_location(beacon)
+                    # Plausibility check before writing
+                    prev_beacon = self._last_position_cache.get(beacon["address"])
+                    is_plausible, reason = _is_beacon_plausible(prev_beacon, beacon, beacon["address"])
+                    
+                    if not is_plausible:
+                        logger.warning(f"Implausible beacon rejected: {beacon['address']} - {reason}")
+                    else:
+                        self._write_location(beacon)
                 
                 current_beacon = Beacon(
                     address=beacon["address"],

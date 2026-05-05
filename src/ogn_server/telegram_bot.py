@@ -29,6 +29,38 @@ from io import BytesIO
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import json
 
+
+def _parse_timestamp(val) -> datetime | None:
+    """Parse timestamp string to datetime object (UTC)."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if s == "":
+        return None
+    if s.isdigit():
+        try:
+            return datetime.utcfromtimestamp(int(s))
+        except Exception:
+            return None
+    try:
+        return datetime.fromisoformat(s)
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S%z"):
+        try:
+            return datetime.strptime(s, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _to_berlin_time(dt: datetime) -> datetime:
+    """Convert UTC datetime to Berlin timezone for IGC date labeling."""
+    berlin_tz = ZoneInfo("Europe/Berlin")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(berlin_tz)
+
  
 
 # IGC File Request Conversation States
@@ -206,45 +238,12 @@ def generate_full_igc(
     if not loc_rows:
         raise ValueError("No location data found")
     
-    berlin_tz = ZoneInfo("Europe/Berlin")
-    
-    def parse_ts(val):
-        if val is None:
-            return None
-        s = str(val).strip()
-        if s == "":
-            return None
-        if s.isdigit():
-            try:
-                return datetime.utcfromtimestamp(int(s))
-            except Exception:
-                return None
-        try:
-            return datetime.fromisoformat(s)
-        except Exception:
-            pass
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S%z"):
-            try:
-                return datetime.strptime(s, fmt)
-            except Exception:
-                continue
-        return None
-    
-    def to_berlin(dt_obj: datetime) -> datetime:
-        if dt_obj is None:
-            return None
-        if dt_obj.tzinfo is None:
-            dt_utc = dt_obj.replace(tzinfo=ZoneInfo("UTC"))
-        else:
-            dt_utc = dt_obj
-        return dt_utc.astimezone(berlin_tz)
-    
     has_matching_date = False
     for r in loc_rows:
         ts = r[7] if len(r) > 7 else None
-        dtv = parse_ts(ts)
+        dtv = _parse_timestamp(ts)
         if dtv is not None:
-            dt_local = to_berlin(dtv)
+            dt_local = _to_berlin_time(dtv)
             if dt_local.strftime("%Y%m%d") == date_str:
                 has_matching_date = True
                 break
@@ -256,7 +255,7 @@ def generate_full_igc(
     first_ts = None
     for r in loc_rows:
         ts = r[7] if len(r) > 7 else None
-        dtv = parse_ts(ts)
+        dtv = _parse_timestamp(ts)
         if dtv is not None:
             first_ts = dtv
             break
@@ -267,7 +266,7 @@ def generate_full_igc(
             first_ts = d
         except Exception:
             first_ts = datetime.utcnow()
-    first_dt = to_berlin(first_ts)  # type: ignore
+    first_dt = _to_berlin_time(first_ts)  # type: ignore
     HFDTE_line = None
     if first_dt is not None:
         dd = first_dt.day
@@ -351,10 +350,10 @@ def generate_full_igc(
             lon = float(r[2])
             alt = int(float(r[4])) if r[4] != '' else 0
             ts = r[7] if len(r) > 7 else None
-            dtv = parse_ts(ts)
+            dtv = _parse_timestamp(ts)
             if dtv is None:
                 continue
-            dt_local = to_berlin(dtv)
+            dt_local = _to_berlin_time(dtv)
             
             record_date = dt_local.strftime("%Y%m%d")
             if record_date != date_str:
