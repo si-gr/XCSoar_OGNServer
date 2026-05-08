@@ -706,14 +706,13 @@ class OGNClient:
 
                 # SAR: update last-known-position cache for this aircraft
                 address = beacon["address"]
-                # Compute Berlin time for the timestamp
+                # Use UTC timestamp (no timezone conversion)
                 ts = beacon["reference_timestamp"]
-                berlin_tz = ZoneInfo("Europe/Berlin")
                 if ts.tzinfo is None:
-                    ts_berlin = ts.replace(tzinfo=berlin_tz)
+                    ts_utc = ts.replace(tzinfo=datetime.timezone.utc)
                 else:
-                    ts_berlin = ts.astimezone(berlin_tz)
-                timestamp_str = ts_berlin.isoformat()
+                    ts_utc = ts.astimezone(datetime.timezone.utc)
+                timestamp_str = ts_utc.isoformat()
                 registration = get_registration(address, self.ddb_devices)
                 self._last_position_cache[address] = {
                     "address": address,
@@ -723,7 +722,7 @@ class OGNClient:
                     "timestamp": timestamp_str,
                     "registration": registration,
                 }
-                self._last_beacon_times[address] = ts_berlin
+                self._last_beacon_times[address] = ts_utc
                 # GEofence monitoring: determine if the beacon is off-field and track offline aircraft
                 geofence_off = bool(is_off_field(beacon["latitude"], beacon["longitude"], self._geofences))
                 if geofence_off:
@@ -781,25 +780,24 @@ class OGNClient:
         offline: list[dict] = []
         if not getattr(self, "_offline_aircraft", None):
             return offline
-        berlin_tz = ZoneInfo("Europe/Berlin")
-        now_berlin = datetime.datetime.now(berlin_tz)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
         for address, info in list(self._offline_aircraft.items()):
             last_seen = info.get("last_seen")
             last_seen_dt: datetime.datetime | None = None
             if isinstance(last_seen, datetime.datetime):
                 if last_seen.tzinfo is None:
-                    last_seen_dt = last_seen.replace(tzinfo=berlin_tz)
+                    last_seen_dt = last_seen.replace(tzinfo=datetime.timezone.utc)
                 else:
-                    last_seen_dt = last_seen.astimezone(berlin_tz)
+                    last_seen_dt = last_seen.astimezone(datetime.timezone.utc)
             else:
                 try:
                     ts = int(last_seen)
-                    last_seen_dt = datetime.datetime.fromtimestamp(ts, tz=berlin_tz)
+                    last_seen_dt = datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc)
                 except Exception:
                     last_seen_dt = None
             if last_seen_dt is None:
                 continue
-            delta = now_berlin - last_seen_dt
+            delta = now_utc - last_seen_dt
             if delta.total_seconds() > threshold_minutes * 60:
                 offline.append(info)
         return offline
@@ -809,20 +807,19 @@ class OGNClient:
         missing: list[dict] = []
         if not getattr(self, "_last_beacon_times", None):
             return missing
-        berlin_tz = ZoneInfo("Europe/Berlin")
-        now_berlin = datetime.datetime.now(berlin_tz)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
         for address, last_beacon_time in list(self._last_beacon_times.items()):
             if isinstance(last_beacon_time, datetime.datetime):
                 if last_beacon_time.tzinfo is None:
-                    last_beacon_time = last_beacon_time.replace(tzinfo=berlin_tz)
+                    last_beacon_time = last_beacon_time.replace(tzinfo=datetime.timezone.utc)
                 else:
-                    last_beacon_time = last_beacon_time.astimezone(berlin_tz)
+                    last_beacon_time = last_beacon_time.astimezone(datetime.timezone.utc)
             else:
                 try:
-                    last_beacon_time = datetime.datetime.fromtimestamp(int(last_beacon_time), tz=berlin_tz)
+                    last_beacon_time = datetime.datetime.fromtimestamp(int(last_beacon_time), tz=datetime.timezone.utc)
                 except Exception:
                     continue
-            delta = now_berlin - last_beacon_time
+            delta = now_utc - last_beacon_time
             if delta.total_seconds() > threshold_minutes * 60:
                 missing.append({
                     "address": address,
@@ -887,26 +884,23 @@ class OGNClient:
     def get_overdue_aircraft(self, threshold_minutes: int = 30) -> list[dict]:
         """Return a list of aircraft that have not reported a beacon within the threshold.
 
-        The comparison is performed in the Europe/Berlin timezone to align with SAR operations.
-
         Args:
             threshold_minutes: The overdue threshold in minutes (default 30).
 
         Returns:
             A list of last-known-position dictionaries for overdue aircraft. Each entry
-            contains address, latitude, longitude, altitude, timestamp (Berlin time),
+            contains address, latitude, longitude, altitude, timestamp (UTC),
             and registration when available.
         """
         overdue: list[dict] = []
         if not self._last_beacon_times:
             return overdue
 
-        berlin_tz = ZoneInfo("Europe/Berlin")
-        now_berlin = datetime.datetime.now(berlin_tz)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
         for address, last_ts in list(self._last_beacon_times.items()):
             if last_ts is None:
                 continue
-            delta = now_berlin - last_ts
+            delta = now_utc - last_ts
             if delta.total_seconds() > threshold_minutes * 60:
                 pos = self._last_position_cache.get(address)
                 if pos:
