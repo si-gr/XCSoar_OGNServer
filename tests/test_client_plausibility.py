@@ -147,57 +147,53 @@ class TestClientBeaconPlausibility:
         assert is_plausible is False
         assert "sink" in reason
     
-    def test_dt_too_small_rejected(self):
-        """Beacon with time delta < 0.5s should be rejected."""
+    def test_time_delta_ignored_uses_default_one_second(self):
+        """Time deltas are ignored - always uses 1 second default for speed calculations."""
+        # Very small time delta (would have been rejected before)
         prev_beacon = {
             "latitude": 47.5,
             "longitude": 13.0,
             "altitude": 1500,
-            "reference_timestamp": datetime.datetime(2024, 1, 15, 10, 0, 0),
         }
         curr_beacon = {
             "latitude": 47.5001,
             "longitude": 13.0001,
-            "altitude": 1510,
-            "reference_timestamp": datetime.datetime(2024, 1, 15, 10, 0, 0, 200000),  # 0.2 seconds
+            "altitude": 1501,  # Small climb: 1m in 1s default = 1 m/s (acceptable)
         }
         
         is_plausible, reason = _is_beacon_plausible(prev_beacon, curr_beacon, "FLR123")
-        assert is_plausible is False
-        assert "dt_too_small" in reason
-    
-    def test_dt_too_large_rejected(self):
-        """Beacon with time delta > 3600s should be rejected."""
-        prev_beacon = {
+        # Should be accepted - time delta check removed, uses 1s default
+        assert is_plausible is True
+        assert reason is None
+        
+        # Large time delta (would have been rejected before)
+        prev_beacon2 = {
             "latitude": 47.5,
             "longitude": 13.0,
             "altitude": 1500,
-            "reference_timestamp": datetime.datetime(2024, 1, 15, 10, 0, 0),
         }
-        curr_beacon = {
+        curr_beacon2 = {
             "latitude": 47.5001,
             "longitude": 13.0001,
-            "altitude": 1510,
-            "reference_timestamp": datetime.datetime(2024, 1, 15, 12, 0, 1),  # 2 hours + 1 second
+            "altitude": 1501,  # Small climb: 1m in 1s default = 1 m/s (acceptable)
         }
         
-        is_plausible, reason = _is_beacon_plausible(prev_beacon, curr_beacon, "FLR123")
-        assert is_plausible is False
-        assert "dt_too_large" in reason
+        is_plausible2, reason2 = _is_beacon_plausible(prev_beacon2, curr_beacon2, "FLR123")
+        # Should be accepted - time delta check removed
+        assert is_plausible2 is True
+        assert reason2 is None
     
     def test_valid_beacon_accepted(self):
-        """Physically plausible beacon should be accepted."""
+        """Physically plausible beacon should be accepted (uses 1s default delta)."""
         prev_beacon = {
             "latitude": 47.5,
             "longitude": 13.0,
             "altitude": 1500,
-            "reference_timestamp": datetime.datetime(2024, 1, 15, 10, 0, 0),
         }
         curr_beacon = {
-            "latitude": 47.51,  # ~1.1km in 60 seconds = ~18 m/s (reasonable glider speed)
-            "longitude": 13.01,
-            "altitude": 1600,  # 100m climb in 60 seconds = 1.67 m/s (reasonable thermal)
-            "reference_timestamp": datetime.datetime(2024, 1, 15, 10, 1, 0),
+            "latitude": 47.5001,  # ~11m in 1s default = 11 m/s (reasonable glider speed)
+            "longitude": 13.0001,
+            "altitude": 1505,  # 5m climb in 1s default = 5 m/s (reasonable thermal)
         }
         
         is_plausible, reason = _is_beacon_plausible(prev_beacon, curr_beacon, "FLR123")

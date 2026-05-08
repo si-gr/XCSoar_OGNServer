@@ -101,7 +101,7 @@ def _is_beacon_plausible(
     
     Parameters:
         prev_beacon: Previous beacon dict or None if first
-        curr_beacon: Current beacon dict with keys: latitude, longitude, altitude, reference_timestamp
+        curr_beacon: Current beacon dict with keys: latitude, longitude, altitude
         flarm_id: FLARM ID for logging
     
     Returns:
@@ -109,10 +109,9 @@ def _is_beacon_plausible(
     
     Validation checks (in order):
         1. Altitude: <= 10,000m
-        2. Time delta: 0.5s <= dt <= 3600s
-        3. Ground speed: <= 97.2 m/s (350 km/h)
-        4. Climb rate: <= 8.0 m/s
-        5. Sink rate: >= -10.0 m/s
+        2. Ground speed: <= 97.2 m/s (350 km/h) - uses 1 second delta if no previous timestamp
+        3. Climb rate: <= 8.0 m/s
+        4. Sink rate: >= -10.0 m/s
     """
     # First beacon always accepted (no previous point to compare)
     if prev_beacon is None:
@@ -127,36 +126,6 @@ def _is_beacon_plausible(
     if alt > PLAUSIBILITY_MAX_ALTITUDE_M:
         return (False, f"altitude:{alt:.0f}m>{PLAUSIBILITY_MAX_ALTITUDE_M:.0f}m")
     
-    # Parse timestamps
-    try:
-        prev_ts = prev_beacon.get("reference_timestamp")
-        curr_ts = curr_beacon.get("reference_timestamp")
-        
-        if prev_ts is None or curr_ts is None:
-            return (False, "invalid_timestamp")
-        
-        # Ensure both timestamps are naive UTC for comparison
-        if prev_ts.tzinfo is not None:
-            prev_dt = prev_ts.replace(tzinfo=None)
-        else:
-            prev_dt = prev_ts
-        
-        if curr_ts.tzinfo is not None:
-            curr_dt = curr_ts.replace(tzinfo=None)
-        else:
-            curr_dt = curr_ts
-        
-        dt = (curr_dt - prev_dt).total_seconds()
-    except Exception:
-        return (False, "invalid_timestamp")
-    
-    # Check time delta sanity
-    if dt < PLAUSIBILITY_MIN_TIME_DELTA_SEC:
-        return (False, f"dt_too_small:{dt:.1f}s")
-    
-    if dt > PLAUSIBILITY_MAX_TIME_DELTA_SEC:
-        return (False, f"dt_too_large:{dt:.0f}s")
-    
     # Parse positions and altitudes
     try:
         prev_lat = float(prev_beacon.get("latitude", 0))
@@ -168,6 +137,9 @@ def _is_beacon_plausible(
         curr_alt = float(curr_beacon.get("altitude", 0))
     except (ValueError, TypeError):
         return (False, "invalid_position_or_altitude")
+    
+    # Use 1 second as default time delta (conservative for speed calculations)
+    dt = 1.0
     
     # Check ground speed
     ground_speed = _calculate_ground_speed(prev_lat, prev_lon, curr_lat, curr_lon, dt)
@@ -524,6 +496,8 @@ class OGNClient:
     
     def _write_location(self, beacon: dict):
         self._rotate_location_file_if_needed()
+        # Use current UTC timestamp instead of beacon timestamp
+        current_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         with open(Config.LOCATION_FILE, "a") as loc_file:
             loc_file.write(
                 f'{beacon["address"]},'
@@ -533,7 +507,7 @@ class OGNClient:
                 f'{beacon["altitude"]},'
                 f'{beacon["ground_speed"]},'
                 f'{beacon["climb_rate"]},'
-                f'{beacon["reference_timestamp"]},'
+                f'{current_ts},'
                 f'{beacon["symbolcode"]}\n'
             )
     
@@ -706,13 +680,9 @@ class OGNClient:
 
                 # SAR: update last-known-position cache for this aircraft
                 address = beacon["address"]
-                # Use UTC timestamp (no timezone conversion)
-                ts = beacon["reference_timestamp"]
-                if ts.tzinfo is None:
-                    ts_utc = ts.replace(tzinfo=datetime.timezone.utc)
-                else:
-                    ts_utc = ts.astimezone(datetime.timezone.utc)
-                timestamp_str = ts_utc.isoformat()
+                # Use current UTC timestamp (ignore beacon timestamp)
+                current_ts = datetime.datetime.now(datetime.timezone.utc)
+                timestamp_str = current_ts.isoformat()
                 registration = get_registration(address, self.ddb_devices)
                 self._last_position_cache[address] = {
                     "address": address,
@@ -722,7 +692,7 @@ class OGNClient:
                     "timestamp": timestamp_str,
                     "registration": registration,
                 }
-                self._last_beacon_times[address] = ts_utc
+                self._last_beacon_times[address] = current_ts
                 # GEofence monitoring: determine if the beacon is off-field and track offline aircraft
                 geofence_off = bool(is_off_field(beacon["latitude"], beacon["longitude"], self._geofences))
                 if geofence_off:
