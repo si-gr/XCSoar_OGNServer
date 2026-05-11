@@ -9,6 +9,7 @@ services:
       - ./adminChat.id:/app/adminChat.id
       - ./location.txt:/app/location.txt
       - ./igc_files:/app/igc_files
+      - ./ddb.json:/app/ddb.json
     ports:
       - "8000:8000"
     restart: unless-stopped

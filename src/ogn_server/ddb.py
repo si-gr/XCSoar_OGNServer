@@ -142,6 +142,15 @@ def download_ddb() -> list[dict] | None:
                     f"DDB rate limited (429). Waiting {wait_time}s before retry {attempt + 1}/{Config.DDB_MAX_RETRIES}"
                 )
                 time.sleep(wait_time)
+            elif response.status_code >= 500:
+                wait_time = Config.DDB_RETRY_BACKOFF_BASE_SECONDS * (2 ** attempt)
+                logger.warning(
+                    f"DDB server error ({response.status_code}). Waiting {wait_time}s before retry {attempt + 1}/{Config.DDB_MAX_RETRIES}"
+                )
+                if attempt < Config.DDB_MAX_RETRIES - 1:
+                    time.sleep(wait_time)
+                else:
+                    last_error = f"DDB returned status {response.status_code}"
             else:
                 last_error = f"DDB returned status {response.status_code}"
                 logger.warning(last_error)
@@ -159,20 +168,73 @@ def download_ddb() -> list[dict] | None:
     return None
 
 
-def get_ddb_devices() -> dict[str, dict]:
+def get_ddb_devices(force_refresh: bool = False) -> dict[str, dict]:
     """
     Get DDB devices as a dictionary keyed by normalized device_id.
     
+    Always returns cached data if available, even if stale.
+    Attempts to refresh cache in background if TTL expired.
+    
+    Args:
+        force_refresh: If True, always attempt to download fresh data
+        
     Returns:
-        Dict mapping normalized device_id (e.g., "3ECA1B") to device info dict
+        Dict mapping normalized device_id (e.g., "3ECA1B") to device info dict.
+        Returns cached data (even if stale) on download failure.
     """
     raw_devices = load_ddb_cache()
-    if raw_devices is None:
+    cache_exists = raw_devices is not None
+    
+    # Check if cache is stale
+    cache_path = Path(Config.DDB_CACHE_FILE)
+    cache_age_minutes = 0
+    if cache_exists and cache_path.exists():
+        try:
+            mtime = cache_path.stat().st_mtime
+            cache_age_minutes = int((time.time() - mtime) / 60)
+        except OSError:
+            cache_age_minutes = float('inf')
+    
+    cache_is_stale = cache_age_minutes > Config.DDB_CACHE_TTL_MINUTES
+    
+    # Always use existing cache if available (even if stale)
+    if cache_exists and not force_refresh:
+        devices_dict = {}
+        for device in raw_devices:
+            device_id = normalize_flarm_id(device.get("device_id", ""))
+            if device_id:
+                devices_dict[device_id] = device
+        
+        # Attempt background refresh if stale (non-blocking)
+        if cache_is_stale:
+            logger.info(f"DDB cache is {cache_age_minutes} minutes old (TTL: {Config.DDB_CACHE_TTL_MINUTES}min). Using cached data, attempting refresh...")
+            try:
+                fresh_devices = download_ddb()
+                if fresh_devices is not None:
+                    save_ddb_cache(fresh_devices)
+                    logger.info("DDB cache refreshed successfully")
+                else:
+                    logger.warning("DDB refresh failed, continuing with cached data")
+            except Exception as e:
+                logger.warning(f"DDB refresh error: {e}. Continuing with cached data")
+        
+        return devices_dict
+    
+    # No cache or forced refresh - must download
+    if not cache_exists or force_refresh:
+        if cache_exists and force_refresh:
+            logger.info("Forced DDB refresh requested")
+        
         raw_devices = download_ddb()
         if raw_devices is not None:
             save_ddb_cache(raw_devices)
+        elif cache_exists:
+            # Download failed but we have old cache - use it
+            logger.warning("DDB download failed, using existing cached data")
+            raw_devices = load_ddb_cache()
     
     if raw_devices is None:
+        logger.error("DDB unavailable and no cache exists. Aircraft registrations will not be resolved.")
         return {}
     
     devices_dict = {}

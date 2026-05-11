@@ -22,8 +22,8 @@ def load_geofences(filepath: str) -> Dict[str, List[Dict[str, Any]]]:
     try:
         with path.open("r", encoding="utf-8") as f:
             data: Any = json.load(f)
-    except FileNotFoundError as e:
-        logger.error({"event": "load_geofences", "error": "file_not_found", "path": str(filepath)})
+    except FileNotFoundError:
+        logger.info({"event": "load_geofences", "status": "file_not_found", "path": str(filepath), "message": "Geofencing disabled - create geofences.json to enable"})
         raise
     except json.JSONDecodeError as e:
         logger.error({"event": "load_geofences", "error": "invalid_json", "path": str(filepath), "detail": str(e)})

@@ -1652,6 +1652,7 @@ class TelegramBot:
                 CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
             ],
             per_user=True,
+            per_callback_query=True,
             conversation_timeout=CONVERSATION_TIMEOUT,
         )
         refresh_handler = CommandHandler('refreshddb', self.refresh_ddb)
@@ -1674,6 +1675,7 @@ class TelegramBot:
                 CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
             ],
             per_user=True,
+            per_callback_query=True,
             conversation_timeout=CONVERSATION_TIMEOUT,
         )
         self.application.add_handler(quickadd_conv_handler)
@@ -1693,6 +1695,7 @@ class TelegramBot:
                 CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
             ],
             per_user=True,
+            per_callback_query=True,
             conversation_timeout=CONVERSATION_TIMEOUT,
         )
 
@@ -1710,6 +1713,7 @@ class TelegramBot:
                 CallbackQueryHandler(self.cancel_igc, pattern="^cancel$"),
             ],
             per_user=True,
+            per_callback_query=True,
             conversation_timeout=CONVERSATION_TIMEOUT,
         )
         self.application.add_handler(overdue_conv_handler)
@@ -1730,6 +1734,8 @@ class TelegramBot:
                 ],
             },
             fallbacks=[CallbackQueryHandler(self.cancel_igc, pattern=r"^cancel$"), CommandHandler('cancel', self.cancel_igc)],
+            per_user=True,
+            per_callback_query=True,
         )
         self.application.add_handler(loc2igc_conv_handler)
         
