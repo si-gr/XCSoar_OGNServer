@@ -35,7 +35,7 @@ from telegram.warnings import PTBUserWarning
 # This is expected behavior when using ConversationHandler with per_message=True
 filterwarnings(
     action="ignore",
-    message=r".*CallbackQueryHandler.*per_message.*",
+    message=r".*per_message=False.*",
     category=PTBUserWarning
 )
 
