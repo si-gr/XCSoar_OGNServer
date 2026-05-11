@@ -89,6 +89,16 @@ def save_ddb_cache(devices: list[dict]) -> bool:
     """
     cache_path = Path(Config.DDB_CACHE_FILE)
     
+    # Handle Docker volume mount edge case: if host file didn't exist at docker-compose up time,
+    # Docker creates an empty directory instead of a file
+    if cache_path.is_dir():
+        try:
+            cache_path.rmdir()
+            logger.warning(f"Removed directory at {cache_path} (Docker volume mount artifact)")
+        except OSError as e:
+            logger.error(f"Failed to remove directory at {cache_path}: {e}")
+            return False
+    
     try:
         with open(cache_path, "w") as f:
             json.dump(devices, f, indent=2)
