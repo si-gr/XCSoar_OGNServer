@@ -58,8 +58,13 @@ def load_ddb_cache() -> list[dict] | None:
         List of device dicts if cache exists, None otherwise
     """
     cache_path = Path(Config.DDB_CACHE_FILE)
-    if not cache_path.exists():
-        return None
+    
+    # Handle Docker volume mount edge case: if path is a directory, look for ddb.json inside it
+    if cache_path.is_dir():
+        cache_file = cache_path / "ddb.json"
+        if not cache_file.exists():
+            return None
+        cache_path = cache_file
     
     try:
         with open(cache_path, "r") as f:
@@ -90,13 +95,17 @@ def save_ddb_cache(devices: list[dict]) -> bool:
     cache_path = Path(Config.DDB_CACHE_FILE)
     
     # Handle Docker volume mount edge case: if host file didn't exist at docker-compose up time,
-    # Docker creates an empty directory instead of a file
+    # Docker creates an empty directory instead of a file. Cannot remove mount point (EBUSY),
+    # so write file inside the directory instead.
     if cache_path.is_dir():
+        cache_file = cache_path / "ddb.json"
         try:
-            cache_path.rmdir()
-            logger.warning(f"Removed directory at {cache_path} (Docker volume mount artifact)")
+            with open(cache_file, "w") as f:
+                json.dump(devices, f, indent=2)
+            logger.info(f"DDB cache saved to {cache_file}")
+            return True
         except OSError as e:
-            logger.error(f"Failed to remove directory at {cache_path}: {e}")
+            logger.error(f"Failed to save DDB cache to {cache_file}: {e}")
             return False
     
     try:

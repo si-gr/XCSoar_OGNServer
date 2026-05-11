@@ -28,6 +28,16 @@ from .config import Config
 from io import BytesIO
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import json
+from warnings import filterwarnings
+from telegram.warnings import PTBUserWarning
+
+# Suppress PTB warning about CallbackQueryHandler with per_message=False
+# This is expected behavior when using ConversationHandler with per_message=True
+filterwarnings(
+    action="ignore",
+    message=r".*CallbackQueryHandler.*per_message.*",
+    category=PTBUserWarning
+)
 
 
 def _parse_timestamp(val) -> datetime | None:

@@ -119,7 +119,7 @@ class TestSaveDdbCache:
         original_cwd = os.getcwd()
         try:
             os.chdir(tmp_path)
-            # Simulate Docker creating a directory instead of file
+            # Simulate Docker creating a directory instead of file (volume mount artifact)
             cache_path = Path("ddb.json")
             cache_path.mkdir()
             assert cache_path.is_dir()
@@ -128,13 +128,37 @@ class TestSaveDdbCache:
             result = save_ddb_cache(test_data)
             
             assert result is True
-            assert cache_path.exists()
-            assert cache_path.is_file()  # Directory was replaced with file
+            # When path is a directory, file is written inside it as ddb.json/ddb.json
+            cache_file = cache_path / "ddb.json"
+            assert cache_file.exists()
+            assert cache_file.is_file()
             
             import json
-            with open(cache_path, "r") as f:
+            with open(cache_file, "r") as f:
                 loaded = json.load(f)
             assert loaded == test_data
+        finally:
+            os.chdir(original_cwd)
+    
+    def test_load_handles_directory_at_cache_path(self, tmp_path):
+        """Test that load_ddb_cache handles Docker volume mount edge case where ddb.json is a directory."""
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tmp_path)
+            # Simulate Docker creating a directory instead of file
+            cache_path = Path("ddb.json")
+            cache_path.mkdir()
+            assert cache_path.is_dir()
+            
+            # Create ddb.json inside the directory
+            cache_file = cache_path / "ddb.json"
+            test_data = [{"device_id": "3ECA1B", "registration": "D-1234"}]
+            import json
+            with open(cache_file, "w") as f:
+                json.dump(test_data, f)
+            
+            result = load_ddb_cache()
+            assert result == test_data
         finally:
             os.chdir(original_cwd)
 
