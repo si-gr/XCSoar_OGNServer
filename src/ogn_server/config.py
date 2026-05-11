@@ -1,4 +1,5 @@
 import os
+import logging
 from pathlib import Path
 
 
@@ -6,7 +7,39 @@ class ConfigError(Exception):
     pass
 
 
+# Valid log levels mapping string to logging constants
+LOG_LEVELS = {
+    "CRITICAL": logging.CRITICAL,
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+}
+
+
+def get_log_level() -> int:
+    """
+    Get logging level from LOG_LEVEL environment variable.
+    
+    Returns:
+        Logging level constant (logging.CRITICAL, logging.ERROR, etc.)
+        
+    Valid values: CRITICAL, ERROR, WARNING, INFO, DEBUG
+    Default: INFO (when env var is not set or invalid)
+    """
+    log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+    
+    if log_level_str not in LOG_LEVELS:
+        # Log warning about invalid value using basic logging (before handlers are configured)
+        print(f"Warning: Invalid LOG_LEVEL '{log_level_str}'. Using default 'INFO'.")
+        return logging.INFO
+    
+    return LOG_LEVELS[log_level_str]
+
+
 class Config:
+    LOG_LEVEL = "INFO"
+    
     OGN_SERVER_HOST = "glidern3.glidernet.org"
     OGN_APRS_USER = "N0CALL"
     OGN_APRS_FILTER = ""

@@ -6,7 +6,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from src.ogn_server.config import Config
+from src.ogn_server.config import Config, get_log_level, LOG_LEVELS
+import logging
 
 
 class TestConfig:
@@ -92,3 +93,78 @@ class TestConfig:
             assert result == "token123456:ABCDEF"
         finally:
             os.chdir(original_cwd)
+
+
+class TestGetLogLevel:
+    """Test cases for get_log_level() function."""
+    
+    def test_log_levels_mapping_exists(self):
+        """Verify LOG_LEVELS mapping contains all valid levels."""
+        assert "CRITICAL" in LOG_LEVELS
+        assert "ERROR" in LOG_LEVELS
+        assert "WARNING" in LOG_LEVELS
+        assert "INFO" in LOG_LEVELS
+        assert "DEBUG" in LOG_LEVELS
+    
+    def test_log_levels_mapping_values(self):
+        """Verify LOG_LEVELS maps to correct logging constants."""
+        assert LOG_LEVELS["CRITICAL"] == logging.CRITICAL
+        assert LOG_LEVELS["ERROR"] == logging.ERROR
+        assert LOG_LEVELS["WARNING"] == logging.WARNING
+        assert LOG_LEVELS["INFO"] == logging.INFO
+        assert LOG_LEVELS["DEBUG"] == logging.DEBUG
+    
+    def test_get_log_level_default(self, monkeypatch):
+        """Test default log level when env var is not set."""
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        assert get_log_level() == logging.INFO
+    
+    def test_get_log_level_info(self, monkeypatch):
+        """Test LOG_LEVEL=INFO."""
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+        assert get_log_level() == logging.INFO
+    
+    def test_get_log_level_debug(self, monkeypatch):
+        """Test LOG_LEVEL=DEBUG."""
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        assert get_log_level() == logging.DEBUG
+    
+    def test_get_log_level_warning(self, monkeypatch):
+        """Test LOG_LEVEL=WARNING."""
+        monkeypatch.setenv("LOG_LEVEL", "WARNING")
+        assert get_log_level() == logging.WARNING
+    
+    def test_get_log_level_error(self, monkeypatch):
+        """Test LOG_LEVEL=ERROR."""
+        monkeypatch.setenv("LOG_LEVEL", "ERROR")
+        assert get_log_level() == logging.ERROR
+    
+    def test_get_log_level_critical(self, monkeypatch):
+        """Test LOG_LEVEL=CRITICAL."""
+        monkeypatch.setenv("LOG_LEVEL", "CRITICAL")
+        assert get_log_level() == logging.CRITICAL
+    
+    def test_get_log_level_case_insensitive(self, monkeypatch):
+        """Test that log level is case-insensitive."""
+        monkeypatch.setenv("LOG_LEVEL", "debug")
+        assert get_log_level() == logging.DEBUG
+        
+        monkeypatch.setenv("LOG_LEVEL", "Info")
+        assert get_log_level() == logging.INFO
+        
+        monkeypatch.setenv("LOG_LEVEL", "CrItIcAl")
+        assert get_log_level() == logging.CRITICAL
+    
+    def test_get_log_level_invalid_value_defaults_to_info(self, monkeypatch, capsys):
+        """Test that invalid log level defaults to INFO with warning."""
+        monkeypatch.setenv("LOG_LEVEL", "INVALID")
+        result = get_log_level()
+        assert result == logging.INFO
+        
+        captured = capsys.readouterr()
+        assert "Warning: Invalid LOG_LEVEL 'INVALID'" in captured.out
+    
+    def test_get_log_level_empty_string_defaults_to_info(self, monkeypatch):
+        """Test that empty string defaults to INFO."""
+        monkeypatch.setenv("LOG_LEVEL", "")
+        assert get_log_level() == logging.INFO

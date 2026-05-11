@@ -12,14 +12,14 @@ import json
 from datetime import datetime
 from prometheus_client import Counter, Histogram, generate_latest
 
-from .config import Config
+from .config import Config, get_log_level
 from .formatters import JSONFormatter
 
 
 handler = logging.StreamHandler()
 handler.setFormatter(JSONFormatter())
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(get_log_level())
 logger.addHandler(handler)
 
 REQUEST_COUNT = Counter('http_requests_total', 'Total HTTP requests', ['method', 'endpoint', 'status'])

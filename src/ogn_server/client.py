@@ -14,9 +14,9 @@ from ogn.parser import parse, AprsParseError
 from .geofence import load_geofences, is_off_field
 
 from .beacon import Beacon
-from .config import Config
+from .config import Config, get_log_level
 from .ddb import get_ddb_devices, get_registration
-from .formatters import JSONFormatter, logger
+from .formatters import JSONFormatter
 
 # Initialize module-level JSON-formatted logger
 logger = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ if not logger.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(JSONFormatter())
     logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger.setLevel(get_log_level())
 
 # Plausibility check thresholds for beacon validation
 PLAUSIBILITY_MAX_GROUND_SPEED_MPS = 97.2      # 350 km/h in m/s (VNE + margin)

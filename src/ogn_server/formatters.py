@@ -2,6 +2,8 @@ import json
 import logging
 from datetime import datetime
 
+from .config import get_log_level
+
 class JSONFormatter(logging.Formatter):
     def format(self, record):
         log_data = {
@@ -27,4 +29,4 @@ if not logger.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(JSONFormatter())
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    logger.setLevel(get_log_level())
