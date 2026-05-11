@@ -122,7 +122,7 @@ class TestTelegramBot:
         assert mock_update.message.reply_markdown_v2.called
         text = mock_update.message.reply_markdown_v2.call_args[0][0]
         # Basic checks for presence of all expected commands in the help text
-        for token in ['/start', '/a', '/d', '/refreshddb', '/igc', '/cancel']:
+        for token in ['/start', '/a', '/d', '/refreshddb', '/igc', '/status', '/cancel']:
             assert token in text
         # Markdown formatting hints should be present
         assert 'Available Commands' in text
@@ -151,7 +151,7 @@ class TestTelegramBot:
         assert isinstance(group_scope, BotCommandScopeAllGroupChats)
         assert isinstance(private_cmds, list)
         names = [c.command for c in private_cmds]
-        for expected in ["start", "a", "d", "refreshddb", "igc", "cancel"]:
+        for expected in ["start", "a", "d", "refreshddb", "igc", "status", "cancel"]:
             assert expected in names
 
     @patch('telegram.Update')

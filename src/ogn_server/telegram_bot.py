@@ -626,6 +626,7 @@ async def post_init(application: Application) -> None:
         BotCommand("loc2igc", "Convert location to IGC"),
         BotCommand("overdue", "List overdue aircraft for SAR"),
         BotCommand("quickadd", "Quick-add from live beacons"),
+        BotCommand("status", "Show server statistics"),
         BotCommand("cancel", "Cancel operation"),
     ]
     group_commands = private_commands.copy()
@@ -703,6 +704,8 @@ class TelegramBot:
             "   Export as JSON or CSV for rescue teams" + "\n"
             "/quickadd \\- Quick\\-add gliders from live beacons" + "\n"
             "   Select from currently flying aircraft" + "\n"
+            "/status \\- Show server statistics" + "\n"
+            "   Display beacon count and API metrics" + "\n"
             "/cancel \\- Cancel current operation" + "\n"
         )
         await update.message.reply_markdown_v2(commands_text)
