@@ -205,6 +205,10 @@ class OGNClient:
             self._geofences = []
         self._offline_aircraft: dict[str, dict] = {}
         
+        # Statistics for /status command
+        self._last_beacon_received: datetime.datetime | None = None
+        self._total_beacons_received: int = 0
+        
         # Suppress OGN library's closeout warning (normal disconnection)
         ogn_client_logger = logging.getLogger('ogn.client.client')
         ogn_client_logger.addFilter(OGNCloseoutFilter())
@@ -693,6 +697,8 @@ class OGNClient:
                     "registration": registration,
                 }
                 self._last_beacon_times[address] = current_ts
+                self._last_beacon_received = current_ts
+                self._total_beacons_received += 1
                 # GEofence monitoring: determine if the beacon is off-field and track offline aircraft
                 geofence_off = bool(is_off_field(beacon["latitude"], beacon["longitude"], self._geofences))
                 if geofence_off:
@@ -884,3 +890,34 @@ class OGNClient:
     def get_all_last_positions(self) -> dict[str, dict]:
         """Return all tracked last-known positions for SAR queries."""
         return self._last_position_cache
+    
+    def get_status(self) -> dict:
+        """Get server status for Telegram /status command.
+        
+        Returns:
+            Dict with beacon statistics:
+            - last_beacon_received: ISO format timestamp of last OGN beacon received
+            - total_beacons_received: Total count of beacons processed since startup
+            - current_aircraft_count: Number of aircraft in current_messages
+            - api_stats: Dict with API sending statistics (from api.py _api_stats)
+        """
+        from .api import _api_stats
+        
+        # Get last beacon time from all current messages
+        last_beacon_iso = None
+        if self.current_messages:
+            try:
+                last_beacon_dt = max(b.reference_timestamp for b in self.current_messages)
+                last_beacon_iso = last_beacon_dt.isoformat()
+            except Exception:
+                pass
+        
+        return {
+            "last_beacon_received": last_beacon_iso,
+            "total_beacons_received": self._total_beacons_received,
+            "current_aircraft_count": len(self.current_messages),
+            "api_stats": {
+                "last_data_sent": _api_stats["last_data_sent"].isoformat() if _api_stats["last_data_sent"] else None,
+                "beacons_sent_count": _api_stats["beacons_sent_count"],
+            },
+        }

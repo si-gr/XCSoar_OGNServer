@@ -1054,6 +1054,56 @@ class TelegramBot:
                 await update.message.reply_text("OGN client not available for DDB refresh.")
         except Exception as e:
             await update.message.reply_markdown_v2(f"Error refreshing DDB: {escape_markdown(str(e), version=2)}")
+    
+    async def status(self, update: Update, context: CallbackContext) -> None:
+        """Handle /status command - show server statistics."""
+        if update.message is None:
+            return
+        if update.effective_user is None or update.effective_user.id != int(self.admin_id):
+            await update.message.reply_markdown_v2("Unauthorized")
+            return
+        
+        if not self.ogn_client:
+            await update.message.reply_text("OGN client not available.")
+            return
+        
+        try:
+            status_data = self.ogn_client.get_status()
+            
+            last_beacon = status_data["last_beacon_received"]
+            if last_beacon:
+                try:
+                    dt = datetime.fromisoformat(last_beacon)
+                    last_beacon_str = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                except Exception:
+                    last_beacon_str = last_beacon
+            else:
+                last_beacon_str = "No beacons received"
+            
+            api_stats = status_data["api_stats"]
+            last_sent = api_stats["last_data_sent"]
+            if last_sent:
+                try:
+                    dt = datetime.fromisoformat(last_sent)
+                    last_sent_str = dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+                except Exception:
+                    last_sent_str = last_sent
+            else:
+                last_sent_str = "No data sent yet"
+            
+            response = (
+                "📊 *Server Status*\n\n"
+                f"🛰️ Last OGN Beacon: `{last_beacon_str}`\n"
+                f"✈️ Current Aircraft: `{status_data['current_aircraft_count']}`\n"
+                f"📈 Total Beacons Received: `{status_data['total_beacons_received']}`\n\n"
+                f"🌐 Last Data Sent: `{last_sent_str}`\n"
+                f"📤 Beacons Sent to Clients: `{api_stats['beacons_sent_count']}`"
+            )
+            
+            await update.message.reply_text(response, parse_mode="Markdown")
+        except Exception as e:
+            logger.exception("Status command failed")
+            await update.message.reply_markdown_v2(f"Error getting status: {escape_markdown(str(e), version=2)}")
 
     async def igc_command(self, update: Update, context: CallbackContext) -> int:
         """Entry point for /igc command. Starts IGC file request conversation."""
@@ -1657,11 +1707,13 @@ class TelegramBot:
         )
         refresh_handler = CommandHandler('refreshddb', self.refresh_ddb)
         start_handler = CommandHandler('start', self.start)
+        status_handler = CommandHandler('status', self.status)
         
         self.application.add_handler(add_handler)
         self.application.add_handler(del_conv_handler)
         self.application.add_handler(refresh_handler)
         self.application.add_handler(start_handler)
+        self.application.add_handler(status_handler)
         self.application.add_handler(overdue_handler)
         # Quick Add conversation
         quickadd_conv_handler = ConversationHandler(

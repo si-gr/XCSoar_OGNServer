@@ -25,6 +25,12 @@ logger.addHandler(handler)
 REQUEST_COUNT = Counter('http_requests_total', 'Total HTTP requests', ['method', 'endpoint', 'status'])
 REQUEST_LATENCY = Histogram('http_request_duration_seconds', 'HTTP request latency', ['endpoint'])
 
+# API statistics for /status command
+_api_stats = {
+    "last_data_sent": None,
+    "beacons_sent_count": 0,
+}
+
 
 def create_app(ogn_client, serverdata: list) -> Flask:
     app = Flask(__name__)
@@ -174,7 +180,13 @@ def create_app(ogn_client, serverdata: list) -> Flask:
                 if bounds is not None:
                     bounds_array = bounds.split(",")
                     if len(bounds_array) == 4:
-                        return ogn_client.get_messages_in_bounds(bounds_array)
+                        result = ogn_client.get_messages_in_bounds(bounds_array)
+                        from datetime import datetime
+                        _api_stats["last_data_sent"] = datetime.utcnow()
+                        lines = result.strip().split("\n")
+                        if len(lines) > 1:
+                            _api_stats["beacons_sent_count"] += len(lines) - 1
+                        return result
             else:
                 logger.warning(f"Invalid token from {client_ip}", extra={"client_ip": client_ip})
         else:
