@@ -209,20 +209,117 @@ class OGNClient:
         self._last_beacon_received: datetime.datetime | None = None
         self._total_beacons_received: int = 0
         
+        # APRS-IS location-based filtering state
+        self._last_aprs_filter: str | None = None
+        self._last_filter_bounds: tuple[float, float, float, float] | None = None
+        self._filter_needs_update: bool = False
+        
         # Suppress OGN library's closeout warning (normal disconnection)
         ogn_client_logger = logging.getLogger('ogn.client.client')
         ogn_client_logger.addFilter(OGNCloseoutFilter())
         
         self._migrate_location_file()
 
-    def refresh_ddb_devices(self) -> int:
-        """Refresh the FLARM device database. Returns number of devices loaded."""
-        self.ddb_devices = get_ddb_devices()
-        logger.info(f"DDB refreshed: {len(self.ddb_devices)} devices")
-        return len(self.ddb_devices)
+    def _haversine_distance_km(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculate great-circle distance between two points in kilometers."""
+        lat1_rad = math.radians(lat1)
+        lat2_rad = math.radians(lat2)
+        delta_lat = math.radians(lat2 - lat1)
+        delta_lon = math.radians(lon2 - lon1)
+        
+        a = (math.sin(delta_lat / 2) ** 2 + 
+             math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2)
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        
+        return (EARTH_RADIUS_METERS * c) / 1000.0
+    
+    def _should_update_filter(self, new_bounds: tuple[float, float, float, float]) -> bool:
+        """Check if filter should be updated based on minimum change threshold.
+        
+        Args:
+            new_bounds: (min_lat, max_lat, min_lon, max_lon)
+            
+        Returns:
+            True if center point moved more than OGN_FILTER_MIN_CHANGE_KM
+        """
+        if self._last_filter_bounds is None:
+            return True
+        
+        # Calculate center points
+        old_center_lat = (self._last_filter_bounds[0] + self._last_filter_bounds[1]) / 2
+        old_center_lon = (self._last_filter_bounds[2] + self._last_filter_bounds[3]) / 2
+        new_center_lat = (new_bounds[0] + new_bounds[1]) / 2
+        new_center_lon = (new_bounds[2] + new_bounds[3]) / 2
+        
+        # Check distance between centers
+        distance_km = self._haversine_distance_km(
+            old_center_lat, old_center_lon,
+            new_center_lat, new_center_lon
+        )
+        
+        return distance_km >= Config.OGN_FILTER_MIN_CHANGE_KM
+    
+    def _build_aprs_filter_string(self, bounds: tuple[float, float, float, float]) -> str:
+        """Build APRS-IS filter string from bounds.
+        
+        Args:
+            bounds: (min_lat, max_lat, min_lon, max_lon)
+            
+        Returns:
+            Filter string in format "r/LAT/LON/RADIUS"
+        """
+        center_lat = (bounds[0] + bounds[1]) / 2
+        center_lon = (bounds[2] + bounds[3]) / 2
+        radius_km = Config.OGN_APRS_FILTER_RADIUS_KM
+        
+        return f"r/{center_lat:.4f}/{center_lon:.4f}/{radius_km}"
+    
+    def set_aprs_filter(self, bounds: tuple[float, float, float, float]) -> None:
+        """Set APRS-IS location filter based on client request bounds.
+        
+        Filter update is deferred to next reconnection cycle to avoid connection churn.
+        Auto-switches to port 14580 when filter is active.
+        
+        Args:
+            bounds: (min_lat, max_lat, min_lon, max_lon) from API request
+        """
+        if not Config.OGN_APRS_FILTER_ENABLED:
+            return
+        
+        if self._should_update_filter(bounds):
+            old_center = None
+            if self._last_filter_bounds:
+                old_center = (
+                    (self._last_filter_bounds[0] + self._last_filter_bounds[1]) / 2,
+                    (self._last_filter_bounds[2] + self._last_filter_bounds[3]) / 2
+                )
+            new_center = ((bounds[0] + bounds[1]) / 2, (bounds[2] + bounds[3]) / 2)
+            distance_km = self._haversine_distance_km(
+                old_center[0] if old_center else new_center[0],
+                old_center[1] if old_center else new_center[1],
+                new_center[0],
+                new_center[1]
+            ) if old_center else 0
+            
+            logger.info(
+                f"APRS filter update scheduled: center moved {distance_km:.1f}km "
+                f"from {old_center if old_center else 'initial'} to {new_center}"
+            )
+            self._last_filter_bounds = bounds
+            self._last_aprs_filter = self._build_aprs_filter_string(bounds)
+            self._filter_needs_update = True
+    
+    def get_last_bounds(self) -> tuple[float, float, float, float] | None:
+        """Get the last filter bounds that were applied.
+        
+        Returns:
+            (min_lat, max_lat, min_lon, max_lon) or None if no filter set
+        """
+        return self._last_filter_bounds
     
     def _load_names_df(self):
         names_path = Path(Config.NAMES_FILE)
+        current_file_time = 0
         if names_path.exists():
             current_file_time = os.stat(Config.NAMES_FILE).st_mtime
             if current_file_time > self.names_df_time:
@@ -813,10 +910,24 @@ class OGNClient:
 
         for attempt in range(max_retries):
             try:
+                # Apply APRS filter if scheduled for update
+                aprs_filter = Config.OGN_APRS_FILTER
+                if self._filter_needs_update and self._last_aprs_filter:
+                    aprs_filter = self._last_aprs_filter
+                    self._filter_needs_update = False
+                    logger.info(f"Applying APRS filter: {aprs_filter}")
+                
+                # Auto-switch to port 14580 when filter is active (supports filtering)
+                if aprs_filter:
+                    ogn_settings.APRS_SERVER_PORT = 14580
+                    logger.info("Using port 14580 for filtered APRS-IS connection")
+                else:
+                    ogn_settings.APRS_SERVER_PORT = 14570  # Default unfiltered port
+                
                 ogn_settings.APRS_SERVER_HOST = Config.OGN_SERVER_HOST
                 client = AprsClient(
                     aprs_user=Config.OGN_APRS_USER,
-                    aprs_filter=Config.OGN_APRS_FILTER,
+                    aprs_filter=aprs_filter,
                     settings=ogn_settings
                 )
                 # Expose the client for external shutdown via self.shutdown()

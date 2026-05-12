@@ -44,6 +44,11 @@ class Config:
     OGN_APRS_USER = "N0CALL"
     OGN_APRS_FILTER = ""
     
+    # APRS-IS location-based filtering configuration
+    OGN_APRS_FILTER_RADIUS_KM = int(os.getenv("OGN_APRS_FILTER_RADIUS_KM", "200"))
+    OGN_FILTER_MIN_CHANGE_KM = int(os.getenv("OGN_FILTER_MIN_CHANGE_KM", "50"))
+    OGN_APRS_FILTER_ENABLED = os.getenv("OGN_APRS_FILTER_ENABLED", "true").lower() == "true"
+    
     NAMES_FILE = "names.csv"
     SERVERDATA_FILE = "serverdata.txt"
     PRIVATE_KEY_FILE = "private.key"

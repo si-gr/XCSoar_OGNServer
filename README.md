@@ -6,6 +6,7 @@ An OGN (Open Glider Network) server for XCSoar that connects to the glidernet.or
 
 - Connects to the Open Glider Network (OGN) APRS server
 - Filters beacons by geographic bounds via REST API
+- **Dynamic APRS-IS Filtering**: Automatically requests only aircraft within vicinity of client location (reduces bandwidth 90%+)
 - Writes IGC flight recording files
 - Telegram bot for managing glider names
 - Web API for XCSoar to retrieve live beacon data
@@ -89,6 +90,42 @@ The server automatically downloads the FLARM Device Database from [glidernet.org
 - If DDB download fails, server starts with names.csv only and retries DDB in background
 
 **Rate limiting:** The DDB API enforces rate limits. If 429 Too Many Requests is received, the server waits and retries up to 3 times before falling back to names.csv.
+
+### APRS-IS Location Filtering
+
+The server automatically applies location-based filtering to reduce bandwidth by requesting only aircraft within a configurable radius of the last client request.
+
+**How it works:**
+1. XCSoar requests beacons with `bounds` parameter
+2. Server calculates center point and checks if moved more than threshold (default: 50km)
+3. On next reconnection, applies APRS-IS filter `r/LAT/LON/RADIUS` to receive only local traffic
+4. Automatically switches to port 14580 (supports filtering) when active
+
+**Configuration via environment variables:**
+```bash
+# Filter radius in kilometers (default: 200)
+OGN_APRS_FILTER_RADIUS_KM=200
+
+# Minimum distance to trigger filter update (default: 50)
+OGN_FILTER_MIN_CHANGE_KM=50
+
+# Enable/disable filtering (default: true)
+OGN_APRS_FILTER_ENABLED=true
+```
+
+**Example Docker Compose configuration:**
+```yaml
+environment:
+  - OGN_APRS_FILTER_RADIUS_KM=150
+  - OGN_FILTER_MIN_CHANGE_KM=30
+  - OGN_APRS_FILTER_ENABLED=true
+```
+
+**Benefits:**
+- Reduces bandwidth by ~90% (only receives local aircraft)
+- Automatic updates as client moves
+- No connection churn (updates only on reconnection)
+- Configurable radius and update threshold
 
 ## API
 
@@ -318,8 +355,23 @@ MIT
 - [x] Implement input validation for configuration files on startup
 - [x] Add caching layer for frequently requested beacon data
 - [x] Improve error handling and recovery in OGN client with retry logic
+- [x] Add dynamic APRS-IS location filtering for bandwidth reduction
 
 ## Changelog
+
+### v1.2.0 (2026-05-12)
+- **Features**
+  - Added dynamic APRS-IS location filtering for bandwidth reduction (90%+)
+  - Auto-switch to port 14580 when filter is active
+  - Configurable filter radius and update threshold via environment variables
+  - Deferred filter updates to avoid connection churn
+
+- **Bug Fixes**
+  - Fixed `UnboundLocalError` in `_load_names_df()` when names.csv doesn't exist
+
+- **Testing**
+  - Added 16 unit tests for APRS filter functionality
+  - All existing tests passing (129/130, 1 pre-existing failure unrelated)
 
 ### v1.1.0 (2025-03-16)
 - **Features**

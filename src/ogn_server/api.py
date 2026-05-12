@@ -180,6 +180,17 @@ def create_app(ogn_client, serverdata: list) -> Flask:
                 if bounds is not None:
                     bounds_array = bounds.split(",")
                     if len(bounds_array) == 4:
+                        try:
+                            bounds_tuple = (
+                                float(bounds_array[0]),
+                                float(bounds_array[1]),
+                                float(bounds_array[2]),
+                                float(bounds_array[3])
+                            )
+                            ogn_client.set_aprs_filter(bounds_tuple)
+                        except ValueError:
+                            logger.warning(f"Invalid bounds format: {bounds}")
+                        
                         result = ogn_client.get_messages_in_bounds(bounds_array)
                         from datetime import datetime
                         _api_stats["last_data_sent"] = datetime.utcnow()
