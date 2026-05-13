@@ -49,6 +49,12 @@ class Config:
     OGN_FILTER_MIN_CHANGE_KM = int(os.getenv("OGN_FILTER_MIN_CHANGE_KM", "50"))
     OGN_APRS_FILTER_ENABLED = os.getenv("OGN_APRS_FILTER_ENABLED", "true").lower() == "true"
     
+    # OGN connection error handling configuration
+    OGN_CONNECT_MAX_RETRIES = int(os.getenv("OGN_CONNECT_MAX_RETRIES", "5"))
+    OGN_CONNECT_RETRY_DELAY = int(os.getenv("OGN_CONNECT_RETRY_DELAY", "10"))
+    OGN_DNS_RETRY_DELAY = int(os.getenv("OGN_DNS_RETRY_DELAY", "60"))
+    OGN_SERVER_HOST_FALLBACK = os.getenv("OGN_SERVER_HOST_FALLBACK", "aprs.glidernet.org")
+    
     NAMES_FILE = "names.csv"
     SERVERDATA_FILE = "serverdata.txt"
     PRIVATE_KEY_FILE = "private.key"

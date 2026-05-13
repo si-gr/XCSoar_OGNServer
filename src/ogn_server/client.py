@@ -902,10 +902,15 @@ class OGNClient:
         return missing
 
     def run(self, callback: Optional[Callable] = None, autoreconnect: bool = True):
+        import socket
         import time
         logger.info("Starting OGN client...")
-        max_retries = 5
-        retry_delay = 10
+        max_retries = Config.OGN_CONNECT_MAX_RETRIES
+        retry_delay = Config.OGN_CONNECT_RETRY_DELAY
+        dns_retry_delay = Config.OGN_DNS_RETRY_DELAY
+        host = Config.OGN_SERVER_HOST
+        fallback_host = Config.OGN_SERVER_HOST_FALLBACK
+        current_host = host
         # Ensure there is a fresh client reference point for potential shutdowns
 
         for attempt in range(max_retries):
@@ -924,7 +929,7 @@ class OGNClient:
                 else:
                     ogn_settings.APRS_SERVER_PORT = 14570  # Default unfiltered port
                 
-                ogn_settings.APRS_SERVER_HOST = Config.OGN_SERVER_HOST
+                ogn_settings.APRS_SERVER_HOST = current_host
                 client = AprsClient(
                     aprs_user=Config.OGN_APRS_USER,
                     aprs_filter=aprs_filter,
@@ -933,20 +938,31 @@ class OGNClient:
                 # Expose the client for external shutdown via self.shutdown()
                 self.client = client
                 client.connect()
-                logger.info("OGN client connected to OGN server")
+                logger.info(f"OGN client connected to OGN server ({current_host})")
                 
                 if callback is None:
                     callback = self.process_beacon
                 
                 client.run(callback=callback, autoreconnect=autoreconnect)
+            except socket.gaierror as e:
+                # DNS resolution failure - specific handling
+                logger.error(f"DNS resolution failed: {current_host} - {e}")
+                if current_host == host and fallback_host:
+                    logger.info(f"Attempting fallback hostname: {fallback_host}")
+                    current_host = fallback_host
+                    continue
+                if attempt < max_retries - 1:
+                    logger.warning(f"Retrying DNS resolution in {dns_retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(dns_retry_delay)
+                else:
+                    logger.critical(f"DNS resolution failed after {max_retries} attempts. Continuing with graceful degradation.")
             except Exception as e:
                 logger.warning(f"OGN client error: {e}. Reconnecting...")
                 if attempt < max_retries - 1:
                     time.sleep(retry_delay)
                     retry_delay *= 2
                 else:
-                    logger.error(f"Max retries reached. Last error: {e}")
-                    raise
+                    logger.critical(f"Connection failed after {max_retries} attempts. Continuing with graceful degradation.")
 
     def shutdown(self):
         """Shutdown the OGN client by closing the underlying AprsClient if connected.

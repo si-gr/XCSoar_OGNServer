@@ -127,6 +127,60 @@ environment:
 - No connection churn (updates only on reconnection)
 - Configurable radius and update threshold
 
+### Connection Error Handling and Recovery
+
+The OGN client implements robust error handling for DNS resolution failures and connection errors, ensuring the server continues running even when the OGN server is unreachable.
+
+**Graceful Degradation:**
+- Client **never crashes** after connection failures - continues retrying indefinitely
+- Server remains operational (API can serve cached beacon data)
+- All errors logged in JSON format for monitoring
+
+**DNS Resolution Failures:**
+- Specific handling for `socket.gaierror` (cannot resolve hostname)
+- Automatically attempts fallback hostname if primary DNS fails
+- Uses longer retry interval (60s) since DNS issues typically persist longer
+- Clear error messages: `"DNS resolution failed: {host} - {error}"`
+
+**Connection Errors:**
+- Exponential backoff for transient connection failures (10s → 20s → 40s...)
+- Separate from DNS retry strategy
+- Logs all connection attempts for debugging
+
+**Fallback Hostname:**
+- Primary: `glidern3.glidernet.org` (default)
+- Fallback: `aprs.glidernet.org` (automatic on DNS failure)
+- Switches immediately without waiting on first DNS failure
+
+**Configuration via environment variables:**
+```bash
+# Maximum retry attempts before graceful degradation (default: 5)
+OGN_CONNECT_MAX_RETRIES=5
+
+# Base retry delay for connection errors in seconds (default: 10)
+OGN_CONNECT_RETRY_DELAY=10
+
+# Retry delay for DNS failures in seconds (default: 60)
+OGN_DNS_RETRY_DELAY=60
+
+# Fallback hostname if primary DNS fails (default: aprs.glidernet.org)
+OGN_SERVER_HOST_FALLBACK=aprs.glidernet.org
+```
+
+**Example Docker Compose configuration:**
+```yaml
+environment:
+  - OGN_CONNECT_MAX_RETRIES=10
+  - OGN_CONNECT_RETRY_DELAY=15
+  - OGN_DNS_RETRY_DELAY=120
+  - OGN_SERVER_HOST_FALLBACK=aprs.glidernet.org
+```
+
+**Monitoring:**
+- Check logs for `"DNS resolution failed"` or `"Connection failed"` messages
+- CRITICAL log level indicates max retries reached
+- Server continues running even after repeated failures
+
 ## API
 
 ### Get Beacons
@@ -358,6 +412,25 @@ MIT
 - [x] Add dynamic APRS-IS location filtering for bandwidth reduction
 
 ## Changelog
+
+### v1.3.0 (2026-05-12)
+- **Features**
+  - Added robust DNS resolution failure handling (`socket.gaierror`)
+  - Implemented graceful degradation - client never crashes after max retries
+  - Automatic fallback hostname switching on DNS failure
+  - Configurable retry parameters via environment variables
+  - Separate retry strategies for DNS (60s) vs connection errors (exponential backoff)
+
+- **Configuration**
+  - `OGN_CONNECT_MAX_RETRIES` - Maximum retry attempts (default: 5)
+  - `OGN_CONNECT_RETRY_DELAY` - Connection retry delay (default: 10s)
+  - `OGN_DNS_RETRY_DELAY` - DNS retry delay (default: 60s)
+  - `OGN_SERVER_HOST_FALLBACK` - Fallback hostname (default: aprs.glidernet.org)
+
+- **Testing**
+  - Added 6 unit tests for error handling scenarios
+  - Tests cover DNS failures, connection errors, fallback hostname, graceful degradation
+  - All new tests passing
 
 ### v1.2.0 (2026-05-12)
 - **Features**
