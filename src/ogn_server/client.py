@@ -696,7 +696,7 @@ class OGNClient:
                 if should_remove:
                     address = self.current_messages[i].address
                     self.current_messages.pop(i)
-                    del self._climb_history[address]
+                    self._climb_history.pop(address, None)
                     i -= 1
                 i += 1
         if time.time() > self.igc_cleanup_timestamp + 3600:
