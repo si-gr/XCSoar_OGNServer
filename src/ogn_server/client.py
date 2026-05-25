@@ -643,7 +643,7 @@ class OGNClient:
         self._climb_history[address] = [
             entry for entry in self._climb_history[address] 
             if entry[0] >= cutoff_time
-        ]
+        ][-20:]
     
     def _get_avg_climb_rate(self, address: str) -> float | None:
         if address not in self._climb_history or not self._climb_history[address]:
@@ -777,8 +777,6 @@ class OGNClient:
                 except ValueError:
                     self.current_messages.append(current_beacon)
 
-                self._update_climb_history(beacon["address"], beacon["reference_timestamp"], beacon["climb_rate"], beacon["ground_speed"], beacon["track"])
-
                 # SAR: update last-known-position cache for this aircraft
                 address = beacon["address"]
                 # Use current UTC timestamp (ignore beacon timestamp)
@@ -835,6 +833,8 @@ class OGNClient:
         for msg in self.current_messages:
             if abs(float(msg.latitude) - center_lat) < 0.5:
                 if abs(float(msg.longitude) - center_lon) < 0.5:
+                    self._update_climb_history(msg.address, msg.reference_timestamp, msg.climb_rate, msg.ground_speed, msg.track)
+                    
                     nickname = self._get_nickname(msg.address)
                     if nickname is not None:
                         avg_climb = self._get_avg_climb_rate(msg.address)
@@ -1048,3 +1048,37 @@ class OGNClient:
                 "beacons_sent_count": _api_stats["beacons_sent_count"],
             },
         }
+    
+    def refresh_ddb_devices(self) -> int:
+        """Refresh FLARM Device Database from ddb.glidernet.org.
+        
+        Forces a fresh download of the DDB, updates internal cache,
+        and returns the number of devices loaded.
+        
+        Returns:
+            Number of devices in the refreshed DDB.
+            Returns 0 if download fails.
+        """
+        from .ddb import download_ddb
+        
+        logger.info("Refreshing DDB from ddb.glidernet.org...")
+        fresh_devices = download_ddb()
+        
+        if fresh_devices is None:
+            logger.error("DDB refresh failed - download returned no data")
+            return 0
+        
+        # Save to cache
+        from .ddb import save_ddb_cache
+        save_ddb_cache(fresh_devices)
+        
+        # Convert to dictionary format used by client
+        from .ddb import normalize_flarm_id
+        self.ddb_devices = {}
+        for device in fresh_devices:
+            device_id = normalize_flarm_id(device.get("device_id", ""))
+            if device_id:
+                self.ddb_devices[device_id] = device
+        
+        logger.info(f"DDB refreshed successfully: {len(self.ddb_devices)} devices")
+        return len(self.ddb_devices)
