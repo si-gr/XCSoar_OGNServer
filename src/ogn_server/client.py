@@ -189,7 +189,7 @@ class OGNClient:
         self._cache_ttl_seconds = 5
         self._error_count = 0
         self._last_error_time = 0
-        self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float]]] = {}
+        self._climb_history: dict[str, list[tuple[datetime.datetime, float, float, float, float, float]]] = {}
         self.client = None
         self._last_rotation_check_time = 0
         # SAR: last known position caches for each FLARM address
@@ -628,7 +628,7 @@ class OGNClient:
         except (ValueError, IndexError):
             return False
     
-    def _update_climb_history(self, address: str, timestamp: datetime.datetime, climb_rate: float, ground_speed: float, track: float):
+    def _update_climb_history(self, address: str, timestamp: datetime.datetime, climb_rate: float, ground_speed: float, track: float, latitude: float, longitude: float):
         # Strip timezone info to make timestamps naive (consistent with _cleanup_old_beacons pattern)
         if timestamp.tzinfo is not None:
             timestamp = timestamp.replace(tzinfo=None)
@@ -639,7 +639,7 @@ class OGNClient:
         if address not in self._climb_history:
             self._climb_history[address] = []
         
-        self._climb_history[address].append((timestamp, climb_rate, ground_speed, track))
+        self._climb_history[address].append((timestamp, climb_rate, ground_speed, track, latitude, longitude))
         self._climb_history[address] = [
             entry for entry in self._climb_history[address] 
             if entry[0] >= cutoff_time
@@ -653,29 +653,52 @@ class OGNClient:
         count = len(self._climb_history[address])
         return total_climb / count
     
-    def _is_circling(self, address: str) -> bool:
-        """Determine if a glider is actively cirling in a thermal.
+    def _are_positions_within_radius(self, positions: list[tuple], radius_m: float) -> bool:
+        """Check if all positions are within radius of each other using max pairwise distance.
         
-        Criteria (all must be met over 30 seconds of history):
-        1. Average climb > 0.5 m/s
+        Args:
+            positions: List of history tuples (timestamp, climb, speed, track, lat, lon)
+            radius_m: Maximum allowed distance in meters between any two points
+        
+        Returns:
+            True if all pairwise distances are < radius_m
         """
-        if address not in self._climb_history or len(self._climb_history[address]) < 30:
+        if len(positions) < 2:
+            return False
+        
+        for i in range(len(positions)):
+            for j in range(i + 1, len(positions)):
+                lat1, lon1 = positions[i][4], positions[i][5]
+                lat2, lon2 = positions[j][4], positions[j][5]
+                distance = _haversine_distance(lat1, lon1, lat2, lon2)
+                if distance >= radius_m:
+                    return False
+        return True
+    
+    def _is_circling(self, address: str) -> bool:
+        """Determine if a glider is actively circling in a thermal.
+        
+        Criteria (all must be met):
+        1. At least 5 position samples
+        2. Average climb > 0.5 m/s
+        3. All positions within 200m of each other (max pairwise distance < 200m)
+        4. Current climb >= 0.2 m/s
+        """
+        if address not in self._climb_history or len(self._climb_history[address]) < 5:
             return False
         
         history = self._climb_history[address]
         
-        # Calculate average climb rate
+        # Criterion 2: Calculate average climb rate
         avg_climb = sum(entry[1] for entry in history) / len(history)
         if avg_climb <= 0.5:
             return False
 
-        if history[-1][3] is not None and history[-2][3] is not None:
-            track_change = abs(history[-1][3] - history[-2][3])
-            if track_change > 180:
-                track_change = 360 - track_change
-            if track_change < 10:
-                return False
+        # Criterion 3: Check all positions within 200m (strict less-than)
+        if not self._are_positions_within_radius(history, 200.0):
+            return False
         
+        # Criterion 4: Current climb >= 0.2 m/s
         if history[-1][1] is not None and history[-1][1] < 0.2:
             return False
                 
@@ -833,7 +856,7 @@ class OGNClient:
         for msg in self.current_messages:
             if abs(float(msg.latitude) - center_lat) < 0.5:
                 if abs(float(msg.longitude) - center_lon) < 0.5:
-                    self._update_climb_history(msg.address, msg.reference_timestamp, msg.climb_rate, msg.ground_speed, msg.track)
+                    self._update_climb_history(msg.address, msg.reference_timestamp, msg.climb_rate, msg.ground_speed, msg.track, msg.latitude, msg.longitude)
                     
                     nickname = self._get_nickname(msg.address)
                     if nickname is not None:
