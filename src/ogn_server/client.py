@@ -684,7 +684,10 @@ class OGNClient:
         3. All positions within 200m of each other (max pairwise distance < 200m)
         4. Current climb >= 0.2 m/s
         """
+        # Criterion 1: Check minimum sample count
         if address not in self._climb_history or len(self._climb_history[address]) < 5:
+            sample_count = len(self._climb_history.get(address, []))
+            logger.debug(f"[CIRCLING] {address}: INSUFFICIENT_SAMPLES - have {sample_count}, need 5")
             return False
         
         history = self._climb_history[address]
@@ -692,16 +695,30 @@ class OGNClient:
         # Criterion 2: Calculate average climb rate
         avg_climb = sum(entry[1] for entry in history) / len(history)
         if avg_climb <= 0.5:
+            logger.debug(f"[CIRCLING] {address}: LOW_AVG_CLIMB - avg={avg_climb:.2f} m/s, need > 0.5 m/s")
             return False
 
         # Criterion 3: Check all positions within 200m (strict less-than)
-        if not self._are_positions_within_radius(history, 200.0):
+        max_distance = 0.0
+        for i in range(len(history)):
+            for j in range(i + 1, len(history)):
+                lat1, lon1 = history[i][4], history[i][5]
+                lat2, lon2 = history[j][4], history[j][5]
+                dist = _haversine_distance(lat1, lon1, lat2, lon2)
+                max_distance = max(max_distance, dist)
+        
+        if max_distance >= 200.0:
+            logger.debug(f"[CIRCLING] {address}: TOO_SPREAD_OUT - max_pairwise_dist={max_distance:.1f}m, need < 200m")
             return False
         
         # Criterion 4: Current climb >= 0.2 m/s
-        if history[-1][1] is not None and history[-1][1] < 0.2:
+        current_climb = history[-1][1]
+        if current_climb is not None and current_climb < 0.2:
+            logger.debug(f"[CIRCLING] {address}: LOW_CURRENT_CLIMB - current={current_climb:.2f} m/s, need >= 0.2 m/s")
             return False
-                
+        
+        # All criteria met - circling detected
+        logger.debug(f"[CIRCLING] {address}: CIRCLING_DETECTED - samples={len(history)}, avg_climb={avg_climb:.2f} m/s, max_dist={max_distance:.1f}m, current_climb={current_climb:.2f} m/s")
         return True
     
     def _cleanup_old_beacons(self):
