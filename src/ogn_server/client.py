@@ -277,13 +277,17 @@ class OGNClient:
     def set_aprs_filter(self, bounds: tuple[float, float, float, float]) -> None:
         """Set APRS-IS location filter based on client request bounds.
         
-        Filter update is deferred to next reconnection cycle to avoid connection churn.
-        Auto-switches to port 14580 when filter is active.
+        In STATIC mode: No-op (filter is fixed at connection time)
+        In DYNAMIC mode: Filter update is deferred to next reconnection cycle to avoid connection churn.
         
         Args:
             bounds: (min_lat, max_lat, min_lon, max_lon) from API request
         """
         if not Config.OGN_APRS_FILTER_ENABLED:
+            return
+        
+        # In static mode, ignore dynamic filter requests (filter is fixed)
+        if Config.OGN_APRS_FILTER_MODE == "static":
             return
         
         if self._should_update_filter(bounds):
@@ -956,12 +960,18 @@ class OGNClient:
 
         for attempt in range(max_retries):
             try:
-                # Apply APRS filter if scheduled for update
-                aprs_filter = Config.OGN_APRS_FILTER
-                if self._filter_needs_update and self._last_aprs_filter:
-                    aprs_filter = self._last_aprs_filter
-                    self._filter_needs_update = False
-                    logger.info(f"Applying APRS filter: {aprs_filter}")
+                # Determine filter based on mode
+                if Config.OGN_APRS_FILTER_MODE == "static":
+                    # Static Europe-wide filter - applied directly, no deferred update
+                    aprs_filter = f"r/{Config.OGN_FILTER_STATIC_CENTER_LAT:.4f}/{Config.OGN_FILTER_STATIC_CENTER_LON:.4f}/{Config.OGN_FILTER_STATIC_RADIUS_KM}"
+                    logger.info(f"Using static APRS filter: {aprs_filter}")
+                else:
+                    # Dynamic mode - use existing deferred update mechanism
+                    aprs_filter = Config.OGN_APRS_FILTER
+                    if self._filter_needs_update and self._last_aprs_filter:
+                        aprs_filter = self._last_aprs_filter
+                        self._filter_needs_update = False
+                        logger.info(f"Applying APRS filter: {aprs_filter}")
                 
                 # Auto-switch to port 14580 when filter is active (supports filtering)
                 if aprs_filter:

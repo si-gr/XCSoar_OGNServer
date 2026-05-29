@@ -49,6 +49,12 @@ class Config:
     OGN_FILTER_MIN_CHANGE_KM = int(os.getenv("OGN_FILTER_MIN_CHANGE_KM", "50"))
     OGN_APRS_FILTER_ENABLED = os.getenv("OGN_APRS_FILTER_ENABLED", "true").lower() == "true"
     
+    # Static Europe-wide filter mode (default: dynamic)
+    OGN_APRS_FILTER_MODE = os.getenv("OGN_APRS_FILTER_MODE", "dynamic").lower()
+    OGN_FILTER_STATIC_CENTER_LAT = float(os.getenv("OGN_FILTER_STATIC_CENTER_LAT", "53.5"))
+    OGN_FILTER_STATIC_CENTER_LON = float(os.getenv("OGN_FILTER_STATIC_CENTER_LON", "15.0"))
+    OGN_FILTER_STATIC_RADIUS_KM = int(os.getenv("OGN_FILTER_STATIC_RADIUS_KM", "1500"))
+    
     # OGN connection error handling configuration
     OGN_CONNECT_MAX_RETRIES = int(os.getenv("OGN_CONNECT_MAX_RETRIES", "25"))
     OGN_CONNECT_RETRY_DELAY = int(os.getenv("OGN_CONNECT_RETRY_DELAY", "20"))
