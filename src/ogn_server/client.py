@@ -869,15 +869,39 @@ class OGNClient:
                 return cached_result
         
         try:
-            center_lat = (float(bounds[0]) + float(bounds[1])) / 2
-            center_lon = (float(bounds[2]) + float(bounds[3])) / 2
+            # Parse original bounds: [min_lat, max_lat, min_lon, max_lon]
+            min_lat_req = float(bounds[0])
+            max_lat_req = float(bounds[1])
+            min_lon_req = float(bounds[2])
+            max_lon_req = float(bounds[3])
         except ValueError:
             return "invalid bound values"
         
+        # Calculate span and expand by 2x (for 4x total area)
+        lat_span = max_lat_req - min_lat_req
+        lon_span = max_lon_req - min_lon_req
+        lat_half_expanded = lat_span  # 2x expansion = add full span to each side
+        lon_half_expanded = lon_span  # 2x expansion = add full span to each side
+        
+        # Enforce minimum bounds of 0.5 degrees to prevent overly small searches
+        MIN_BOUNDS_DEGREES = 0.5
+        if lat_half_expanded < MIN_BOUNDS_DEGREES:
+            lat_half_expanded = MIN_BOUNDS_DEGREES
+        if lon_half_expanded < MIN_BOUNDS_DEGREES:
+            lon_half_expanded = MIN_BOUNDS_DEGREES
+        
+        # Calculate expanded bounds
+        center_lat = (min_lat_req + max_lat_req) / 2
+        center_lon = (min_lon_req + max_lon_req) / 2
+        min_lat_expanded = center_lat - lat_half_expanded
+        max_lat_expanded = center_lat + lat_half_expanded
+        min_lon_expanded = center_lon - lon_half_expanded
+        max_lon_expanded = center_lon + lon_half_expanded
+        
         filtered_messages = []
         for msg in self.current_messages:
-            if abs(float(msg.latitude) - center_lat) < 0.5:
-                if abs(float(msg.longitude) - center_lon) < 0.5:
+            if min_lat_expanded <= float(msg.latitude) <= max_lat_expanded:
+                if min_lon_expanded <= float(msg.longitude) <= max_lon_expanded:
                     self._update_climb_history(msg.address, msg.reference_timestamp, msg.climb_rate, msg.ground_speed, msg.track, msg.latitude, msg.longitude)
                     
                     nickname = self._get_nickname(msg.address)
