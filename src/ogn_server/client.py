@@ -639,7 +639,8 @@ class OGNClient:
         if address not in self._climb_history:
             self._climb_history[address] = []
         
-        self._climb_history[address].append((timestamp, climb_rate, ground_speed, track, latitude, longitude))
+        # Use receive time (current_time) instead of beacon timestamp to avoid clock skew issues with OGN server
+        self._climb_history[address].append((current_time, climb_rate, ground_speed, track, latitude, longitude))
         self._climb_history[address] = [
             entry for entry in self._climb_history[address] 
             if entry[0] >= cutoff_time
