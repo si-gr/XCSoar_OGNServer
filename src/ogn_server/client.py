@@ -634,7 +634,7 @@ class OGNClient:
             timestamp = timestamp.replace(tzinfo=None)
         
         current_time = datetime.datetime.utcnow()
-        cutoff_time = current_time - datetime.timedelta(seconds=30)
+        cutoff_time = current_time - datetime.timedelta(seconds=80)
         
         if address not in self._climb_history:
             self._climb_history[address] = []
